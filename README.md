@@ -21,7 +21,7 @@ Packages are shared across your local network — no internet required.
 ## Quick Install (Debian 13 / Ubuntu)
 
 ```bash
-git clone https://github.com/you/deliver
+git clone https://github.com/fsminecrafter/deliver-package-manager.git
 cd deliver
 sudo ./install.sh
 ```
