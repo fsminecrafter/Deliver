@@ -1,0 +1,12 @@
+[Info]
+name=hello-deliver
+version=1.0
+description=A simple hello world package for Deliver
+arch=any
+operatingsystem=POSIX / LINUX / WINDOWS / MACOS
+dependencies=
+rivalpack=
+
+[Install]
+installscript=install.sh
+installcommand=echo "Hello from hello-deliver!"
