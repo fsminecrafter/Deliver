@@ -1,3 +1,6 @@
+![Deliver LAN Package Manager Logo](logo.png)
+
+
 # Deliver — LAN Package Manager
 
 A fast, secure, zero-config LAN package manager written in C++17.  
