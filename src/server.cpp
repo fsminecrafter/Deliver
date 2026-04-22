@@ -222,8 +222,10 @@ bool Server::authenticate(socket_t fd) {
 }
 
 void Server::handle_install_request(socket_t fd, const std::vector<uint8_t>& body,
-                                     const std::vector<uint8_t>& session_key) {
+                                     const std::vector<uint8_t>& session_key,
+                                     const std::string& peer_ip) {
     std::string pkg_name(body.begin(), body.end());
+    log_info("Install request for '" + pkg_name + "' from " + peer_ip);
 
     // Validate: package name must be non-empty and contain only safe characters
     if (pkg_name.empty() || pkg_name.find("..") != std::string::npos ||
@@ -302,8 +304,10 @@ void Server::handle_install_request(socket_t fd, const std::vector<uint8_t>& bod
 }
 
 void Server::handle_search_request(socket_t fd, const std::vector<uint8_t>& body,
-                                    const std::vector<uint8_t>& session_key) {
+                                    const std::vector<uint8_t>& session_key,
+                                    const std::string& peer_ip) {
     std::string query(body.begin(), body.end());
+    log_info("Search request '" + query + "' from " + peer_ip);
     auto results = registry_.search(query);
 
     std::ostringstream ss;
