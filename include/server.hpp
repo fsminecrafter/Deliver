@@ -30,9 +30,11 @@ private:
 
     // Handle a specific message type
     void handle_install_request(socket_t fd, const std::vector<uint8_t>& payload,
-                                 const std::vector<uint8_t>& session_key);
+                                 const std::vector<uint8_t>& session_key,
+                                 const std::string& peer_ip);  // add this
     void handle_search_request(socket_t fd, const std::vector<uint8_t>& payload,
-                                const std::vector<uint8_t>& session_key);
+                                const std::vector<uint8_t>& session_key,
+                                const std::string& peer_ip);   // add this
     void handle_pkg_list(socket_t fd, const std::vector<uint8_t>& session_key);
 
     bool authenticate(socket_t fd);
