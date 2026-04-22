@@ -130,6 +130,37 @@ socket_t connect_to(const std::string& host, uint16_t port, int timeout_ms) {
     return fd;
 }
 
+// Try to connect to a local server and parse its HELLO frame
+static bool probe_server(const std::string& host, uint16_t port, ServerInfo& out) {
+    socket_t fd = connect_to(host, port, 800);
+    if (fd == INVALID_SOCK) return false;
+
+    // Server sends HELLO frame immediately on connect:
+    // "DLR_SERVER|<name>|<needs_pw>|<proto_ver>"
+    // We need to recv it then close cleanly
+    // Reuse recv_frame but we're in net:: scope so it's available
+    auto frame = recv_frame(fd);
+    close_socket(fd);
+    if (frame.empty()) return false;
+
+    std::string msg(frame.begin(), frame.end());
+    if (msg.rfind("DLR_SERVER|", 0) != 0) return false;
+
+    // Parse: DLR_SERVER|name|needs_pw|proto_ver
+    auto p1 = msg.find('|', 11);
+    auto p2 = (p1 != std::string::npos) ? msg.find('|', p1+1) : std::string::npos;
+    if (p1 == std::string::npos) return false;
+
+    out.name           = msg.substr(11, p1 - 11);
+    out.needs_password = (p2 != std::string::npos)
+                         ? msg.substr(p1+1, p2-p1-1) == "1"
+                         : msg.substr(p1+1) == "1";
+    out.host           = host;
+    out.port           = port;
+    out.reachable      = true;
+    return true;
+}
+
 bool send_all(socket_t s, const uint8_t* data, size_t len) {
     size_t sent = 0;
     while (sent < len) {
@@ -262,27 +293,18 @@ std::vector<ServerInfo> discover_servers(int timeout_ms) {
     }
 
     close_socket(fd);
-
-        // Always probe localhost — UDP broadcast does not reliably loop back
-    {
-        socket_t probe = connect_to("127.0.0.1", DEFAULT_PORT, 500);
-        if (probe != INVALID_SOCK) {
-            close_socket(probe);
-            // Check it's not already in results
-            bool already = false;
-            for (auto& s : results)
-                if (s.host == "127.0.0.1" || s.host == "localhost") { already = true; break; }
-            if (!already) {
-                ServerInfo local;
-                local.host      = "127.0.0.1";
-                local.port      = DEFAULT_PORT;
-                local.name      = "localhost";
-                local.reachable = true;
+    // Always probe localhost explicitly (broadcast doesn't loop back reliably)
+    for (const auto& addr : {"127.0.0.1", "::1"}) {
+        bool found = false;
+        for (auto& s : results)
+            if (s.host == addr) { found = true; break; }
+        if (!found) {
+            ServerInfo local;
+            if (probe_server(addr, DEFAULT_PORT, local)) {
                 results.push_back(local);
             }
         }
     }
-    
     return results;
 }
 
