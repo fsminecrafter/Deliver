@@ -57,7 +57,7 @@ std::string resolve_host(const std::string& host);
 
 // Probe a specific host:port and return its ServerInfo (name, auth etc.)
 // Returns false if not reachable or not a Deliver server
-bool probe_server(const std::string& host, uint16_t port, ServerInfo& out);
+static bool probe_server(const std::string& host, uint16_t port, ServerInfo& out);
 
 } // namespace net
 } // namespace dlr

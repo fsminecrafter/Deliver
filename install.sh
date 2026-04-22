@@ -31,7 +31,7 @@ cat <<'EOF'
  | | | |/ _ \ | \ \ / / _ \ '__|
  | |_| |  __/ | |\ V /  __/ |
  |____/ \___|_|_| \_/ \___|_|
-  LAN Package Manager v1.0
+ Package Manager by fsminecrafter
 EOF
 echo -e "${NC}"
 

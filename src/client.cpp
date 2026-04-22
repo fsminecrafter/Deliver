@@ -13,13 +13,15 @@
 #include <sstream>
 #include <cmath>
 
+#pragma execution_character_set("utf-8")
+
 namespace fs = std::filesystem;
 
 namespace dlr {
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Progress bar renderer
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 static std::string human_size(uintmax_t bytes) {
     const char* units[] = {"B","KB","MB","GB"};
@@ -32,32 +34,80 @@ static std::string human_size(uintmax_t bytes) {
 }
 
 static void print_progress(const std::string& label,
-                            uintmax_t current, uintmax_t total,
-                            double speed_bytes_per_sec = 0) {
+                          uintmax_t current, uintmax_t total,
+                          double speed_bytes_per_sec = 0) {
     const int BAR_WIDTH = 38;
-    int pct = (total > 0) ? (int)(100.0 * current / total) : 0;
-    int filled = (total > 0) ? (int)((double)BAR_WIDTH * current / total) : 0;
-    filled = std::min(filled, BAR_WIDTH);
+    static size_t last_line_length = 0;
 
-    std::cout << "\r";
+    double progress = (total > 0) ? (double)current / total : 0.0;
+    progress = std::min(progress, 1.0);
+
+    int pct = (int)(progress * 100.0);
+
+    // Smooth resolution (8 levels per cell)
+    const int TOTAL_TICKS = BAR_WIDTH * 8;
+    int ticks = (int)(progress * TOTAL_TICKS);
+
+    int full_blocks = ticks / 8;
+    int remainder   = ticks % 8;
+
+    static const char* partials[] = {
+        "", "▏","▎","▍","▌","▋","▊","▉"
+    };
+
+    std::string bar;
+    int visible_width = 0;
+
+    // Full blocks
+    for (int i = 0; i < full_blocks; ++i) {
+        bar += "█";
+        visible_width++;
+    }
+
+    // Partial block
+    if (full_blocks < BAR_WIDTH && remainder > 0) {
+        bar += partials[remainder];
+        visible_width++;
+    }
+
+    // Fill rest with light shade
+    int remaining = BAR_WIDTH - visible_width;
+    for (int i = 0; i < remaining; ++i) {
+        bar += "░";
+    }
+
+    std::ostringstream out;
+
 #ifndef _WIN32
-    // Coloured bar
-    std::cout << "\033[36m" << std::setw(18) << std::left << label << "\033[0m ";
-    std::cout << "\033[90m[\033[0m";
-    std::cout << "\033[32m" << std::string(filled, '█') << "\033[0m";
-    std::cout << std::string(BAR_WIDTH - filled, '░');
-    std::cout << "\033[90m]\033[0m";
-    std::cout << " \033[1m" << std::setw(3) << pct << "%\033[0m";
-    std::cout << "  " << human_size(current) << "/" << human_size(total);
+    out << "\033[36m" << std::setw(18) << std::left << label << "\033[0m ";
+    out << "\033[90m[\033[0m";
+    out << "\033[32m" << bar << "\033[0m";
+    out << "\033[90m]\033[0m";
+    out << " \033[1m" << std::setw(3) << pct << "%\033[0m";
+    out << "  " << human_size(current) << "/" << human_size(total);
+
     if (speed_bytes_per_sec > 0)
-        std::cout << "  \033[33m" << human_size((uintmax_t)speed_bytes_per_sec) << "/s\033[0m";
+        out << "  \033[33m"
+            << human_size((uintmax_t)speed_bytes_per_sec)
+            << "/s\033[0m";
 #else
-    std::cout << std::setw(18) << std::left << label << " ";
-    std::cout << "[" << std::string(filled,'=') << std::string(BAR_WIDTH-filled,' ') << "]";
-    std::cout << " " << std::setw(3) << pct << "%";
-    std::cout << "  " << human_size(current) << "/" << human_size(total);
+    int filled = (int)(BAR_WIDTH * progress);
+    out << std::setw(18) << std::left << label << " ";
+    out << "[" << std::string(filled,'=')
+        << std::string(BAR_WIDTH-filled,' ') << "]";
+    out << " " << std::setw(3) << pct << "%";
+    out << "  " << human_size(current) << "/" << human_size(total);
 #endif
-    std::cout << std::flush;
+
+    std::string line = out.str();
+
+    size_t pad = 0;
+    if (last_line_length > line.size())
+        pad = last_line_length - line.size();
+
+    std::cout << "\r" << line << std::string(pad, ' ') << std::flush;
+
+    last_line_length = line.size();
 }
 
 static void print_progress_done(const std::string& label, uintmax_t total,
@@ -89,9 +139,9 @@ static void spinner_step(const std::string& msg, int step) {
 #endif
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Installation step tracker
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 static void install_step(int step, int total, const std::string& msg) {
 #ifndef _WIN32
@@ -117,9 +167,9 @@ static void install_warn(const std::string& msg) {
 #endif
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Client ctor
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 Client::Client(ClientConfig cfg)
     : cfg_(std::move(cfg))
@@ -137,9 +187,9 @@ Client::Client(ClientConfig cfg)
     db_.load();
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Internal helpers
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 static socket_t connect_and_handshake(const ServerInfo& srv,
                                        std::vector<uint8_t>& out_key,
@@ -200,9 +250,7 @@ static void print_divider(char c = '-', int w = 60) {
     std::cout << std::string(w, c) << "\n";
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 // Server discovery
-// ══════════════════════════════════════════════════════════════════════════════
 
 std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg_name) {
     // 1. Check cached server info
@@ -235,9 +283,7 @@ std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg
     return std::nullopt;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 // Download
-// ══════════════════════════════════════════════════════════════════════════════
 
 std::string Client::download_from_server(const ServerInfo& srv, const std::string& pkg_name) {
     std::vector<uint8_t> key;
@@ -331,9 +377,9 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
     return out_path;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Install from tar
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     const int TOTAL_STEPS = 5;
@@ -529,9 +575,9 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     return 0;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+
 // Public commands
-// ══════════════════════════════════════════════════════════════════════════════
+
 
 int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
     if (db_.is_installed(pkg_name)) {
