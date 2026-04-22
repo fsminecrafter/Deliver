@@ -10,6 +10,7 @@
 #include <memory>
 #include <thread>
 #include <chrono>
+#include "version.hpp"
 
 static std::unique_ptr<dlr::Server> g_server;
 
@@ -65,7 +66,7 @@ int main(int argc, char** argv) {
     }
 
     if (args[0] == "--version" || args[0] == "-v") {
-        std::cout << "Deliver LAN Package Manager v1.0\n";
+        std::cout << "Deliver LAN Package Manager v" << dlr::VERSION << "\n";
         return 0;
     }
 
@@ -81,7 +82,7 @@ int main(int argc, char** argv) {
     if (args.empty()) { usage(); return 0; }
     std::string cmd = args[0];
 
-    // ── Server commands ────────────────────────────────────────────────────
+    // -- Server commands ----------------------------------------------------
     auto srv_cfg = dlr::load_server_config();
     if (srv_cfg.name.empty()) srv_cfg.name = "deliver-server";
 
@@ -140,9 +141,9 @@ int main(int argc, char** argv) {
         reg.load();
         auto pkgs = reg.list_all();
         std::cout << "\n";
-        std::cout << std::string(60,'═') << "\n";
+        std::cout << std::string(60,'=') << "\n";
         std::cout << "  " << dlr::bold("Server Packages") << "  (" << pkgs.size() << " total)\n";
-        std::cout << std::string(60,'═') << "\n";
+        std::cout << std::string(60,'=') << "\n";
         if (pkgs.empty()) {
             std::cout << "  " << dlr::yellow("No packages presented yet.\n");
             std::cout << "  Use: sudo dlr presentfile <file> <name>\n";
@@ -165,11 +166,11 @@ int main(int argc, char** argv) {
                 std::cout << "\n";
             }
         }
-        std::cout << std::string(60,'═') << "\n\n";
+        std::cout << std::string(60,'=') << "\n\n";
         return 0;
     }
 
-    // ── Client commands ────────────────────────────────────────────────────
+    // -- Client commands ----------------------------------------------------
     auto cli_cfg = dlr::load_client_config();
     dlr::Client client(cli_cfg);
 

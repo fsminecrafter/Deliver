@@ -50,9 +50,9 @@ void Server::print_status() const {
     // Check if service is running
     bool svc_running = (system("systemctl is-active --quiet deliver-server 2>/dev/null") == 0);
 
-    std::cout << "\n" << std::string(60,'═') << "\n";
+    std::cout << "\n" << std::string(60,'=') << "\n";
     std::cout << "  " << bold("Deliver Server Status") << "\n";
-    std::cout << std::string(60,'─') << "\n";
+    std::cout << std::string(60,'-') << "\n";
     std::cout << "  Name     : " << cyan(cfg_.name) << "\n";
     std::cout << "  Port     : " << cfg_.port << "  (TCP)\n";
     std::cout << "  Discovery: " << (DISCOVERY_PORT) << "  (UDP broadcast)\n";
@@ -60,7 +60,7 @@ void Server::print_status() const {
     std::cout << "  Service  : " << (svc_running ? green("running") : yellow("not running as service")) << "\n";
     std::cout << "  Packages : " << pkgs.size() << " presented\n";
     std::cout << "  Data dir : " << cfg_.data_dir << "\n";
-    std::cout << std::string(60,'─') << "\n";
+    std::cout << std::string(60,'-') << "\n";
 
     if (pkgs.empty()) {
         std::cout << "  " << yellow("No packages presented yet.") << "\n";
@@ -71,7 +71,7 @@ void Server::print_status() const {
                   << std::setw(10) << "Version"
                   << std::setw(10) << "Arch"
                   << "OS\n";
-        std::cout << std::string(60,'─') << "\n";
+        std::cout << std::string(60,'-') << "\n";
         for (auto& p : pkgs) {
             std::cout << "  " << std::left
                       << std::setw(20) << green(p.name)
@@ -84,7 +84,7 @@ void Server::print_status() const {
                 std::cout << "    " << cyan("→ ") << p.file_path << "\n";
         }
     }
-    std::cout << std::string(60,'═') << "\n\n";
+    std::cout << std::string(60,'=') << "\n\n";
 }
 
 // Process 1: broadcast hello every 5 seconds

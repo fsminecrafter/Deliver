@@ -196,7 +196,7 @@ static std::vector<uint8_t> recv_dec(socket_t fd, const std::vector<uint8_t>& ke
     return frame;
 }
 
-static void print_divider(char c = '─', int w = 60) {
+static void print_divider(char c = '-', int w = 60) {
     std::cout << std::string(w, c) << "\n";
 }
 
@@ -376,7 +376,7 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
 
     // Print package card
     std::cout << "\n";
-    print_divider('═');
+    print_divider('=');
 #ifndef _WIN32
     std::cout << "  \033[1;36m" << info->name << "\033[0m  v" << info->version << "\n";
 #else
@@ -396,7 +396,7 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     }
     if (!info->rivalpack.empty())
         std::cout << "  " << yellow("⚠ Conflicts with: " + info->rivalpack) << "\n";
-    print_divider('═');
+    print_divider('=');
     std::cout << "\n";
 
     // Compatibility check
@@ -517,14 +517,14 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     fs::remove_all(extract_dir);
 
     std::cout << "\n";
-    print_divider('═');
+    print_divider('=');
 #ifndef _WIN32
     std::cout << "  \033[1;32m✓ Successfully installed " << info->name
               << " v" << info->version << "\033[0m\n";
 #else
     std::cout << "  Successfully installed " << info->name << " v" << info->version << "\n";
 #endif
-    print_divider('═');
+    print_divider('=');
     std::cout << "\n";
     return 0;
 }
@@ -764,9 +764,9 @@ int Client::cmd_servers(const std::string& query) {
 int Client::cmd_list() {
     auto pkgs = db_.list_packages();
     std::cout << "\n";
-    print_divider('═');
+    print_divider('=');
     std::cout << "  " << bold("Available Packages") << "\n";
-    print_divider('═');
+    print_divider('=');
 
     if (pkgs.empty()) {
         std::cout << "  " << yellow("No packages in database.") << "\n";
@@ -793,14 +793,14 @@ int Client::cmd_list() {
             if (!p.description.empty())
                 std::cout << "    " << p.description << "\n";
         }
-        print_divider('─');
+        print_divider('-');
         std::cout << "  " << pkgs.size() << " package(s)";
         long installed_count = 0;
         for (auto& p : pkgs) if (db_.is_installed(p.name)) installed_count++;
         std::cout << "  (" << installed_count << " installed)\n";
     }
 
-    print_divider('═');
+    print_divider('=');
     std::cout << "\n";
     return 0;
 }
