@@ -1,5 +1,8 @@
 #pragma once
 
 namespace dlr {
-    constexpr const char* VERSION = "1.0.0";
+#ifndef DLR_VERSION
+#define DLR_VERSION "1.0.0"
+#endif
+    constexpr const char* VERSION = DLR_VERSION;
 }
