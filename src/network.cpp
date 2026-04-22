@@ -262,6 +262,27 @@ std::vector<ServerInfo> discover_servers(int timeout_ms) {
     }
 
     close_socket(fd);
+
+        // Always probe localhost — UDP broadcast does not reliably loop back
+    {
+        socket_t probe = connect_to("127.0.0.1", DEFAULT_PORT, 500);
+        if (probe != INVALID_SOCK) {
+            close_socket(probe);
+            // Check it's not already in results
+            bool already = false;
+            for (auto& s : results)
+                if (s.host == "127.0.0.1" || s.host == "localhost") { already = true; break; }
+            if (!already) {
+                ServerInfo local;
+                local.host      = "127.0.0.1";
+                local.port      = DEFAULT_PORT;
+                local.name      = "localhost";
+                local.reachable = true;
+                results.push_back(local);
+            }
+        }
+    }
+    
     return results;
 }
 
