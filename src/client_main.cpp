@@ -64,6 +64,11 @@ int main(int argc, char** argv) {
         usage(); return 0;
     }
 
+    if (args[0] == "--version" || args[0] == "-v") {
+        std::cout << "Deliver LAN Package Manager v1.0\n";
+        return 0;
+    }
+
     // Global flags
     bool auto_yes = false;
     std::vector<std::string> filtered;

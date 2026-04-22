@@ -126,7 +126,14 @@ Client::Client(ClientConfig cfg)
     , db_(cfg_.db_dir)
 {
     net::init();
+    // ← change this:
     fs::create_directories(cfg_.cache_dir);
+    // ← to this:
+    std::error_code ec;
+    fs::create_directories(cfg_.cache_dir, ec);
+    if (ec) {
+        log_warn("Cannot create cache dir: " + cfg_.cache_dir + " (" + ec.message() + ")");
+    }
     db_.load();
 }
 

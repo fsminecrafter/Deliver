@@ -12,7 +12,9 @@ using json = nlohmann::json;
 namespace dlr {
 
 LocalDB::LocalDB(const std::string& db_dir) : db_dir_(db_dir) {
-    fs::create_directories(db_dir_);
+    std::error_code ec;
+    fs::create_directories(db_dir_, ec);
+    // silently ignore — load() will just find no files
 }
 
 static std::string pkg_db_path(const std::string& d) { return d + "/packages.json"; }
