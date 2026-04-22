@@ -173,10 +173,10 @@ void Server::proc_handle_client(socket_t fd, std::string peer_ip) {
 
         switch (type) {
             case MsgType::INSTALL_REQUEST:
-                handle_install_request(fd, body, session_key);
+                handle_install_request(fd, body, session_key, peer_ip);
                 break;
             case MsgType::SEARCH_REQUEST:
-                handle_search_request(fd, body, session_key);
+                handle_search_request(fd, body, session_key, peer_ip);
                 break;
             case MsgType::PKG_LIST:
                 handle_pkg_list(fd, session_key);
