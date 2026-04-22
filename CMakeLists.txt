@@ -34,6 +34,8 @@ add_executable(dlr
     src/client_main.cpp
     src/client.cpp
     src/local_db.cpp
+    src/server.cpp
+    src/package_registry.cpp
 )
 
 target_link_libraries(dlr_server
