@@ -14,14 +14,21 @@ error() { echo -e "  ${RED}✗${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${CYAN}${BOLD}──► $*${NC}"; }
 banner(){ echo -e "${CYAN}${BOLD}$*${NC}"; }
 
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' "$SCRIPT_DIR/CMakeLists.txt" \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
 banner "╔═══════════════════════════════════════════╗"
 banner "║   Deliver Installer — Debian 13           ║"
 banner "╚═══════════════════════════════════════════╝"
-echo ""
+echo -e "   Version: ${DLR_VERSION}\n"
 
 [[ $EUID -eq 0 ]] || error "Must be run as root: sudo ./install_debian.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build"
 
 # ── Check binaries ─────────────────────────────────────────────────────────────
@@ -29,8 +36,8 @@ step "Checking build output..."
 if [[ ! -f "$BUILD_DIR/dlr" || ! -f "$BUILD_DIR/dlr_server" ]]; then
     error "Binaries not found in $BUILD_DIR. Run 'sudo ./build_debian.sh' first."
 fi
-info "Found: dlr  $(du -sh "$BUILD_DIR/dlr" | cut -f1)"
-info "Found: dlr_server  $(du -sh "$BUILD_DIR/dlr_server" | cut -f1)"
+info "Found: dlr        $(du -sh "$BUILD_DIR/dlr"        | cut -f1)"
+info "Found: dlr_server $(du -sh "$BUILD_DIR/dlr_server" | cut -f1)"
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BIN_DIR="/usr/local/bin"
@@ -107,8 +114,8 @@ fi
 step "Installing systemd service..."
 cat > /etc/systemd/system/deliver-server.service << SERVICE
 [Unit]
-Description=Deliver LAN Package Manager Server
-Documentation=https://github.com/you/deliver
+Description=Deliver LAN Package Manager Server v${DLR_VERSION}
+Documentation=https://github.com/fsminecrafter/deliver-package-manager
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -121,8 +128,6 @@ ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
-
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=deliver-server
@@ -157,7 +162,8 @@ _dlr_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
     local cmds="install download scan list ping search servers status restart \
-                presentfile presentfolder attach generate make"
+                presentfile presentfolder attach generate make \
+                unpresentfile unpresentfolder removepackage clear"
     case "$prev" in
         install|download|search) ;;
         ping|servers) ;;
@@ -185,7 +191,7 @@ cat << 'SUCCESS'
 ╚═══════════════════════════════════════════════════╝
 SUCCESS
 echo -e "${NC}"
-
+echo "  Version:    $DLR_VERSION"
 echo "  Binaries:   /usr/local/bin/dlr"
 echo "              /usr/local/bin/dlr_server"
 echo "  Config:     /etc/deliver/"
@@ -197,6 +203,11 @@ echo ""
 echo "    ${BOLD}# Server — share a file:${NC}"
 echo "    sudo dlr presentfile /path/to/app myapp"
 echo "    sudo dlr generate list.pkg myapp"
+echo ""
+echo "    ${BOLD}# Server — remove packages:${NC}"
+echo "    sudo dlr removepackage myapp       # remove one"
+echo "    sudo dlr unpresentfile myapp       # alias"
+echo "    sudo dlr clear                     # remove all"
 echo ""
 echo "    ${BOLD}# Client — install it:${NC}"
 echo "    dlr scan"

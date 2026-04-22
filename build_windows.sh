@@ -19,6 +19,13 @@ warn()  { echo -e "${YELLOW}[!!]${NC} $*"; }
 error() { echo -e "${RED}[ERR]${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${CYAN}${BOLD}==> $*${NC}"; }
 
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+if [[ -f CMakeLists.txt ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' CMakeLists.txt \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
 echo -e "${CYAN}${BOLD}"
 cat << 'BANNER'
   ____       _ _
@@ -26,9 +33,8 @@ cat << 'BANNER'
  | | | |/ _ \ | \ \ / / _ \ '__|
  | |_| |  __/ | |\ V /  __/ |
  |____/ \___|_|_| \_/ \___|_|
-  Build Script — Windows (MSYS2 / MinGW-w64)
 BANNER
-echo -e "${NC}"
+echo -e "  Build Script — Windows (MSYS2 / MinGW-w64)   v${DLR_VERSION}${NC}"
 
 [[ -f CMakeLists.txt ]] || error "Run from the deliver/ source directory."
 
@@ -89,7 +95,7 @@ if [[ -z "${BUILD_WITH_MSVC:-}" ]]; then
         info "All MSYS2 packages present"
     fi
 
-    step "Configuring CMake (MinGW Makefiles)..."
+    step "Configuring CMake (Ninja)..."
     BUILD_DIR="$(pwd)/build_win"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
@@ -109,7 +115,7 @@ if [[ -z "${BUILD_WITH_MSVC:-}" ]]; then
     ls -lh dlr.exe dlr_server.exe 2>/dev/null || ls -lh *.exe 2>/dev/null || true
 
     echo ""
-    echo -e "${GREEN}${BOLD}Windows build complete!${NC}"
+    echo -e "${GREEN}${BOLD}Windows build complete! (Deliver v${DLR_VERSION})${NC}"
     echo ""
     echo "  Binaries: $BUILD_DIR"
     echo "  dlr.exe"
@@ -124,7 +130,7 @@ if [[ -z "${BUILD_WITH_MSVC:-}" ]]; then
 else
     # ── MSVC path ──────────────────────────────────────────────────────────────
     step "MSVC build path"
-    warn "nlohmann-json: you may need to manually install via vcpkg:"
+    warn "nlohmann-json: install via vcpkg if needed:"
     warn "  vcpkg install nlohmann-json openssl zlib"
     warn "  Then pass -DCMAKE_TOOLCHAIN_FILE=[vcpkg]/scripts/buildsystems/vcpkg.cmake"
 
@@ -150,6 +156,6 @@ else
 
     cmake --build . --config Release --parallel
 
-    echo -e "${GREEN}${BOLD}MSVC build complete!${NC}"
+    echo -e "${GREEN}${BOLD}MSVC build complete! (Deliver v${DLR_VERSION})${NC}"
     echo "  Binaries in: $BUILD_DIR/Release/"
 fi

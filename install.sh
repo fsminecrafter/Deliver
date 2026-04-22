@@ -12,11 +12,12 @@ DATA_DIR="/var/lib/deliver"
 CACHE_DIR="/var/cache/deliver"
 LOG_DIR="/var/log/deliver"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'
+BOLD='\033[1m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 error() { echo -e "${RED}[✗]${NC} $*" >&2; }
-step()  { echo -e "\n${CYAN}==>${NC} $*"; }
+step()  { echo -e "\n${CYAN}${BOLD}==>${NC} $*"; }
 
 # Check root
 if [[ $EUID -ne 0 ]]; then
@@ -24,7 +25,14 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-echo -e "${CYAN}"
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+if [[ -f CMakeLists.txt ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' CMakeLists.txt \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
+echo -e "${CYAN}${BOLD}"
 cat <<'EOF'
   ____       _ _
  |  _ \  ___| (_)_   _____ _ __
@@ -33,7 +41,8 @@ cat <<'EOF'
  |____/ \___|_|_| \_/ \___|_|
  Package Manager by fsminecrafter
 EOF
-echo -e "${NC}"
+echo -e "  Version: ${DLR_VERSION}${NC}"
+echo ""
 
 # ── Detect OS ──────────────────────────────────────────────────────────────────
 step "Detecting system..."
@@ -64,12 +73,12 @@ case "$ID" in
         pacman -Sy --noconfirm gcc cmake ninja openssl zlib nlohmann-json tar
         ;;
     *)
-        warn "Unknown distro '$ID'. Please install: cmake, libssl-dev, zlib-dev, nlohmann-json manually."
+        warn "Unknown distro '$ID'. Please install manually: cmake, libssl-dev, zlib-dev, nlohmann-json"
         ;;
 esac
 
 # ── Build ──────────────────────────────────────────────────────────────────────
-step "Building Deliver..."
+step "Building Deliver v${DLR_VERSION}..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build"
@@ -141,7 +150,7 @@ step "Installing systemd service..."
 
 cat > /etc/systemd/system/deliver-server.service <<SERVICE
 [Unit]
-Description=Deliver LAN Package Manager Server
+Description=Deliver LAN Package Manager Server v${DLR_VERSION}
 After=network.target
 Wants=network.target
 
@@ -177,33 +186,41 @@ else
     warn "Service failed to start. Check: journalctl -u deliver-server"
 fi
 
-# ── Shell completion (optional) ────────────────────────────────────────────────
+# ── Shell completion ────────────────────────────────────────────────────────────
 step "Installing bash completion..."
 cat > /etc/bash_completion.d/dlr <<'COMP'
 _dlr_completion() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local commands="install download scan ping search servers status restart presentfile presentfolder attach generate make"
+    local commands="install download scan ping search servers list status restart \
+                    presentfile presentfolder attach generate make \
+                    unpresentfile unpresentfolder removepackage clear"
     if [[ COMP_CWORD -eq 1 ]]; then
         COMPREPLY=($(compgen -W "$commands" -- "$cur"))
     fi
 }
 complete -F _dlr_completion dlr
 COMP
+info "Bash completion installed"
 
 # ── Final summary ──────────────────────────────────────────────────────────────
-echo -e "\n${GREEN}╔═══════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   Deliver installed successfully!  🎉     ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════════╝${NC}"
+echo -e "\n${GREEN}${BOLD}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}${BOLD}║   Deliver v${DLR_VERSION} installed successfully!  ✓      ║${NC}"
+echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "  Config:  $CONFIG_DIR/"
 echo "  Data:    $DATA_DIR/"
 echo "  Logs:    $LOG_DIR/server.log"
 echo ""
 echo "  Quick start:"
-echo "    sudo dlr presentfile myapp /path/to/myapp"
+echo "    sudo dlr presentfile /path/to/myapp myapp"
 echo "    sudo dlr generate list.pkg myapp"
 echo "    dlr scan"
 echo "    dlr install myapp"
+echo ""
+echo "  Remove packages:"
+echo "    sudo dlr removepackage myapp"
+echo "    sudo dlr unpresentfile myapp"
+echo "    sudo dlr clear                    # remove all"
 echo ""
 echo "  Service:  systemctl {start|stop|status} deliver-server"
 echo ""

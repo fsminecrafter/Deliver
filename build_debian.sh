@@ -13,6 +13,13 @@ warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 error() { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${CYAN}${BOLD}==> $*${NC}"; }
 
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+if [[ -f CMakeLists.txt ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' CMakeLists.txt \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
 echo -e "${CYAN}${BOLD}"
 cat << 'BANNER'
   ____       _ _
@@ -20,14 +27,12 @@ cat << 'BANNER'
  | | | |/ _ \ | \ \ / / _ \ '__|
  | |_| |  __/ | |\ V /  __/ |
  |____/ \___|_|_| \_/ \___|_|
-  Build Script — Debian 13 (Trixie)
 BANNER
-echo -e "${NC}"
+echo -e "  Build Script — Debian 13 (Trixie)   v${DLR_VERSION}${NC}"
 
 # ── Sanity checks ──────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || error "Run as root: sudo ./build_debian.sh"
 [[ -f CMakeLists.txt ]] || error "Run this script from the deliver/ source directory."
-
 command -v apt-get &>/dev/null || error "apt-get not found. Are you on Debian/Ubuntu?"
 
 # ── OS check ──────────────────────────────────────────────────────────────────
@@ -74,7 +79,6 @@ else
     info "All dependencies already installed"
 fi
 
-# Check cmake version (need 3.16+)
 CMAKE_VER=$(cmake --version | head -1 | awk '{print $3}')
 info "CMake version: $CMAKE_VER"
 
@@ -98,7 +102,7 @@ info "Build successful!"
 ls -lh dlr dlr_server 2>/dev/null || ls -lh deliver deliver_server 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}${BOLD}Build complete!${NC}"
+echo -e "${GREEN}${BOLD}Build complete! (Deliver v${DLR_VERSION})${NC}"
 echo ""
 echo "  Binaries are in: $BUILD_DIR"
 echo ""

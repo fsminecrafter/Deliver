@@ -17,7 +17,9 @@ static std::string timestamp() {
     return buf;
 }
 
-static void print(const std::string& prefix, const std::string& msg, const std::string& colour_code) {
+// FIX: param order was (prefix, msg, colour_code) but callers passed (prefix, colour_code, msg)
+// Corrected to match caller convention: print(prefix, colour_code, msg)
+static void print(const std::string& prefix, const std::string& colour_code, const std::string& msg) {
     std::lock_guard<std::mutex> lk(g_log_mtx);
 #ifndef _WIN32
     std::cerr << "\033[" << colour_code << "m[" << timestamp() << "] [" << prefix << "]\033[0m " << msg << "\n";
@@ -26,20 +28,10 @@ static void print(const std::string& prefix, const std::string& msg, const std::
 #endif
 }
 
-void log_debug(const std::string& msg) { if (g_level <= LogLevel::DEBUG) print("DEBUG","37", msg); }
-void log_info (const std::string& msg) { if (g_level <= LogLevel::INFO)  print("INFO", "32", msg); }
-void log_warn (const std::string& msg) { if (g_level <= LogLevel::WARN)  print("WARN", "33", msg); }
-void log_error(const std::string& msg) { if (g_level <= LogLevel::ERROR) print("ERROR","31", msg); }
-
-// Overloads that print instead of using colour_code as index
-void _log(const std::string& level, const std::string& colour, const std::string& msg) {
-    std::lock_guard<std::mutex> lk(g_log_mtx);
-#ifndef _WIN32
-    std::cerr << "\033[" << colour << "m[" << timestamp() << "] [" << level << "]\033[0m " << msg << "\n";
-#else
-    std::cerr << "[" << timestamp() << "] [" << level << "] " << msg << "\n";
-#endif
-}
+void log_debug(const std::string& msg) { if (g_level <= LogLevel::DEBUG) print("DEBUG", "37", msg); }
+void log_info (const std::string& msg) { if (g_level <= LogLevel::INFO)  print("INFO",  "32", msg); }
+void log_warn (const std::string& msg) { if (g_level <= LogLevel::WARN)  print("WARN",  "33", msg); }
+void log_error(const std::string& msg) { if (g_level <= LogLevel::ERROR) print("ERROR", "31", msg); }
 
 std::string green (const std::string& s) {
 #ifndef _WIN32

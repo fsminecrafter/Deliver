@@ -13,26 +13,32 @@ warn()  { echo -e "  ${YELLOW}⚠${NC} $*"; }
 error() { echo -e "  ${RED}✗${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${CYAN}${BOLD}──► $*${NC}"; }
 
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' "$SCRIPT_DIR/CMakeLists.txt" \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
 echo -e "${CYAN}${BOLD}"
 cat << 'BANNER'
 ╔═══════════════════════════════════════════╗
 ║   Deliver Installer — Ubuntu              ║
 ╚═══════════════════════════════════════════╝
 BANNER
-echo -e "${NC}"
+echo -e "   Version: ${DLR_VERSION}${NC}\n"
 
 [[ $EUID -eq 0 ]] || error "Run as root: sudo ./install_ubuntu.sh"
 
-# Ubuntu vs Debian: minor path differences handled here
 if [[ -f /etc/os-release ]]; then
     source /etc/os-release
     info "OS: $PRETTY_NAME"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build"
 
-[[ -f "$BUILD_DIR/dlr" ]] || error "Binary not found. Run 'sudo ./build_ubuntu.sh' first."
+[[ -f "$BUILD_DIR/dlr" ]]        || error "Binary not found. Run 'sudo ./build_ubuntu.sh' first."
 [[ -f "$BUILD_DIR/dlr_server" ]] || error "dlr_server not found."
 
 BIN_DIR="/usr/local/bin"
@@ -61,7 +67,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR" "$CACHE_DIR" "$LOG_DIR"
 step "Installing binaries..."
 install -m 755 "$BUILD_DIR/dlr"        "$BIN_DIR/dlr"
 install -m 755 "$BUILD_DIR/dlr_server" "$BIN_DIR/dlr_server"
-info "dlr → $BIN_DIR/dlr"
+info "dlr        → $BIN_DIR/dlr"
 info "dlr_server → $BIN_DIR/dlr_server"
 
 step "Writing config..."
@@ -97,7 +103,7 @@ fi
 step "Installing systemd service..."
 cat > /etc/systemd/system/deliver-server.service << SERVICE
 [Unit]
-Description=Deliver LAN Package Manager Server
+Description=Deliver LAN Package Manager Server v${DLR_VERSION}
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -132,6 +138,24 @@ else
     warn "Service didn't start — check: journalctl -u deliver-server"
 fi
 
+# ── Bash completion ────────────────────────────────────────────────────────────
+step "Installing bash completion..."
+cat > /etc/bash_completion.d/dlr << 'COMP'
+_dlr_complete() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local cmds="install download scan list ping search servers status restart \
+                presentfile presentfolder attach generate make \
+                unpresentfile unpresentfolder removepackage clear"
+    case "${COMP_WORDS[COMP_CWORD-1]}" in
+        install|download|search) ;;
+        ping|servers) ;;
+        *) COMPREPLY=($(compgen -W "$cmds" -- "$cur")) ;;
+    esac
+}
+complete -F _dlr_complete dlr
+COMP
+info "Bash completion installed"
+
 # UFW
 if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
     step "Configuring UFW..."
@@ -149,11 +173,13 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}"
 echo "╔═══════════════════════════════════════════╗"
-echo "║   ✓  Deliver installed!                   ║"
+echo "║   ✓  Deliver v${DLR_VERSION} installed!         ║"
 echo "╚═══════════════════════════════════════════╝"
 echo -e "${NC}"
-echo "  dlr scan              → discover servers"
-echo "  dlr list              → list packages"
-echo "  dlr install <name>    → install a package"
-echo "  sudo dlr status       → server status"
+echo "  dlr scan                    → discover servers"
+echo "  dlr list                    → list packages"
+echo "  dlr install -y <name>       → install a package"
+echo "  sudo dlr status             → server status"
+echo "  sudo dlr removepackage <n>  → remove a package"
+echo "  sudo dlr clear              → remove all packages"
 echo ""

@@ -13,6 +13,13 @@ warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 error() { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${CYAN}${BOLD}==> $*${NC}"; }
 
+# ── Read version from CMakeLists.txt ──────────────────────────────────────────
+DLR_VERSION="unknown"
+if [[ -f CMakeLists.txt ]]; then
+    DLR_VERSION=$(grep -m1 'project(deliver VERSION' CMakeLists.txt \
+                  | sed 's/.*VERSION \([0-9][0-9.]*\).*/\1/' || true)
+fi
+
 echo -e "${CYAN}${BOLD}"
 cat << 'BANNER'
   ____       _ _
@@ -20,9 +27,8 @@ cat << 'BANNER'
  | | | |/ _ \ | \ \ / / _ \ '__|
  | |_| |  __/ | |\ V /  __/ |
  |____/ \___|_|_| \_/ \___|_|
-  Build Script — Ubuntu 22.04 / 24.04
 BANNER
-echo -e "${NC}"
+echo -e "  Build Script — Ubuntu 22.04 / 24.04   v${DLR_VERSION}${NC}"
 
 [[ $EUID -eq 0 ]] || error "Run as root: sudo ./build_ubuntu.sh"
 [[ -f CMakeLists.txt ]] || error "Run from the deliver/ source directory."
@@ -34,7 +40,6 @@ if [[ -f /etc/os-release ]]; then
     if [[ "$ID" != "ubuntu" ]]; then
         warn "This script targets Ubuntu. Detected: $ID. Proceeding..."
     fi
-    # Check version
     VER_NUM="${VERSION_ID//./}"
     if [[ "$VER_NUM" -lt 2204 ]]; then
         warn "Ubuntu ${VERSION_ID} detected. Recommend 22.04+."
@@ -49,7 +54,6 @@ apt-get update -qq
 
 step "Installing build dependencies..."
 
-# nlohmann-json is in universe on Ubuntu
 apt-get install -y software-properties-common 2>/dev/null || true
 add-apt-repository -y universe 2>/dev/null || true
 
@@ -66,8 +70,7 @@ DEPS=(
     git
 )
 
-# Ubuntu 22.04 might have older cmake, check and upgrade if needed
-if apt-cache show cmake | grep -q "Version: 3.2"; then
+if apt-cache show cmake 2>/dev/null | grep -q "Version: 3.2"; then
     warn "Old cmake detected. Installing newer version via Kitware APT..."
     apt-get install -y gpg wget
     wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null \
@@ -101,7 +104,7 @@ info "Build successful!"
 ls -lh dlr dlr_server 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}${BOLD}Build complete!${NC}"
+echo -e "${GREEN}${BOLD}Build complete! (Deliver v${DLR_VERSION})${NC}"
 echo "  Binaries: $BUILD_DIR"
 echo "  Next:     sudo ./install_ubuntu.sh"
 echo ""

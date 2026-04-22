@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(deliver VERSION 1.0.0 LANGUAGES CXX)
 
-add_compile_definitions(DLR_VERSION="1.0.0")
+# Single source of truth: version always comes from project() above.
+# Both binaries get DLR_VERSION so version.hpp never needs a hard-coded fallback.
+add_compile_definitions(DLR_VERSION="${PROJECT_VERSION}")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -11,7 +14,7 @@ find_package(ZLIB REQUIRED)
 
 include_directories(include)
 
-# Common sources
+# Common sources shared by both binaries
 set(COMMON_SOURCES
     src/pkg_parser.cpp
     src/crypto.cpp
@@ -21,20 +24,10 @@ set(COMMON_SOURCES
     src/logger.cpp
 )
 
-# Server binary
+# ── Server binary ──────────────────────────────────────────────────────────────
 add_executable(dlr_server
     ${COMMON_SOURCES}
     src/server_main.cpp
-    src/server.cpp
-    src/package_registry.cpp
-)
-
-# Client binary (also the main dlr CLI)
-add_executable(dlr
-    ${COMMON_SOURCES}
-    src/client_main.cpp
-    src/client.cpp
-    src/local_db.cpp
     src/server.cpp
     src/package_registry.cpp
 )
@@ -44,6 +37,16 @@ target_link_libraries(dlr_server
     OpenSSL::SSL
     OpenSSL::Crypto
     ZLIB::ZLIB
+)
+
+# ── Client binary (main dlr CLI) ───────────────────────────────────────────────
+add_executable(dlr
+    ${COMMON_SOURCES}
+    src/client_main.cpp
+    src/client.cpp
+    src/local_db.cpp
+    src/server.cpp
+    src/package_registry.cpp
 )
 
 target_link_libraries(dlr
