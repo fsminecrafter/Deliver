@@ -224,6 +224,19 @@ bool Server::authenticate(socket_t fd) {
 void Server::handle_install_request(socket_t fd, const std::vector<uint8_t>& body,
                                      const std::vector<uint8_t>& session_key) {
     std::string pkg_name(body.begin(), body.end());
+
+    // Validate: package name must be non-empty and contain only safe characters
+    if (pkg_name.empty() || pkg_name.find("..") != std::string::npos ||
+        pkg_name.find('/') != std::string::npos ||
+        pkg_name.find('\\') != std::string::npos) {
+        std::vector<uint8_t> err{(uint8_t)MsgType::INSTALL_ERROR};
+        std::string msg = "Invalid package name";
+        err.insert(err.end(), msg.begin(), msg.end());
+        auto out = session_key.empty() ? err : crypto::encrypt(err, session_key);
+        net::send_frame(fd, out);
+        return;
+    }
+
     log_info("Install request for: " + pkg_name);
 
     auto info = registry_.find(pkg_name);
