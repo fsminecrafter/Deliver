@@ -205,14 +205,14 @@ static void print_divider(char c = '-', int w = 60) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg_name) {
-    // Check local cache first
+    // 1. Check cached server info
     auto cached = db_.find_package(pkg_name);
     if (cached && !cached->server_origin.empty()) {
         auto srv = db_.find_server(cached->server_origin);
         if (srv && !srv->host.empty()) return srv;
     }
 
-    // Live LAN discovery
+    // 2. Live LAN discovery (includes localhost probe via discover_servers)
     auto servers = net::discover_servers(2500);
     for (auto& srv : servers) {
         std::vector<uint8_t> key;
