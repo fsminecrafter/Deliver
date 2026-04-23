@@ -60,7 +60,7 @@ static void print_progress(const std::string& label,
 
     // Full blocks
     for (int i = 0; i < full_blocks; ++i) {
-        bar += "█";
+        bar += "▉";
         visible_width++;
     }
 
@@ -116,7 +116,7 @@ static void print_progress_done(const std::string& label, uintmax_t total,
 #ifndef _WIN32
     std::cout << "\033[36m" << std::setw(18) << std::left << label << "\033[0m ";
     std::cout << "\033[32m[";
-    std::cout << std::string(38, '█') << "] 100%\033[0m";
+    std::cout << std::string(38, '▉') << "] 100%\033[0m";
     std::cout << "  " << human_size(total);
     if (elapsed_sec > 0)
         std::cout << "  \033[33m" << human_size((uintmax_t)(total/elapsed_sec)) << "/s\033[0m";
