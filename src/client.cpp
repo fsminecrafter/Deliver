@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <cmath>
+#include <cstring>
 
 #pragma execution_character_set("utf-8")
 
