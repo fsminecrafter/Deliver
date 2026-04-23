@@ -84,6 +84,14 @@ struct ServerInfo {
     int64_t     latency_ms{-1};
 };
 
+// HTTP/HTTPS repository entry
+struct RepoInfo {
+    std::string name;
+    std::string url;          // base URL, e.g. https://example.com/myrepo
+    std::string description;
+    bool        enabled{true};
+};
+
 struct DependencyConstraint {
     std::string name;
     char        op{0};  // 0 = any, '=' exact, '<' less, '>' greater

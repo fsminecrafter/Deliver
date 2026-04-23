@@ -14,14 +14,15 @@ namespace dlr {
 LocalDB::LocalDB(const std::string& db_dir) : db_dir_(db_dir) {
     std::error_code ec;
     fs::create_directories(db_dir_, ec);
-    // silently ignore — load() will just find no files
 }
 
 static std::string pkg_db_path(const std::string& d) { return d + "/packages.json"; }
 static std::string srv_db_path(const std::string& d) { return d + "/servers.json"; }
 static std::string ins_db_path(const std::string& d) { return d + "/installed.json"; }
+static std::string rep_db_path(const std::string& d) { return d + "/repos.json"; }
 
 void LocalDB::load() {
+    // Packages
     {
         std::ifstream f(pkg_db_path(db_dir_));
         if (f) {
@@ -36,6 +37,7 @@ void LocalDB::load() {
                     info.rivalpack       = obj.value("rivalpack","");
                     info.installscript   = obj.value("installscript","");
                     info.installcommand  = obj.value("installcommand","");
+                    info.file_path       = obj.value("file_path","");
                     info.arch            = arch_from_string(obj.value("arch","any"));
                     info.operatingsystem = os_from_string(obj.value("os","any"));
                     if (obj.contains("dependencies"))
@@ -46,6 +48,7 @@ void LocalDB::load() {
             } catch (...) {}
         }
     }
+    // Servers
     {
         std::ifstream f(srv_db_path(db_dir_));
         if (f) {
@@ -62,6 +65,24 @@ void LocalDB::load() {
             } catch (...) {}
         }
     }
+    // Repos
+    {
+        std::ifstream f(rep_db_path(db_dir_));
+        if (f) {
+            try {
+                json j; f >> j;
+                for (auto& [name, obj] : j.items()) {
+                    RepoInfo ri;
+                    ri.name        = name;
+                    ri.url         = obj.value("url","");
+                    ri.description = obj.value("description","");
+                    ri.enabled     = obj.value("enabled",true);
+                    repos_[name]   = ri;
+                }
+            } catch (...) {}
+        }
+    }
+    // Installed
     {
         std::ifstream f(ins_db_path(db_dir_));
         if (f) {
@@ -75,6 +96,7 @@ void LocalDB::load() {
 }
 
 void LocalDB::save() const {
+    // Packages
     {
         json j;
         for (auto& [name, info] : packages_) {
@@ -85,6 +107,7 @@ void LocalDB::save() const {
                 {"rivalpack",      info.rivalpack},
                 {"installscript",  info.installscript},
                 {"installcommand", info.installcommand},
+                {"file_path",      info.file_path},
                 {"arch",           arch_to_string(info.arch)},
                 {"os",             os_to_string(info.operatingsystem)},
                 {"dependencies",   info.dependencies}
@@ -93,6 +116,7 @@ void LocalDB::save() const {
         std::ofstream f(pkg_db_path(db_dir_));
         f << j.dump(2);
     }
+    // Servers
     {
         json j;
         for (auto& [name, si] : servers_) {
@@ -105,6 +129,20 @@ void LocalDB::save() const {
         std::ofstream f(srv_db_path(db_dir_));
         f << j.dump(2);
     }
+    // Repos
+    {
+        json j;
+        for (auto& [name, ri] : repos_) {
+            j[name] = {
+                {"url",         ri.url},
+                {"description", ri.description},
+                {"enabled",     ri.enabled}
+            };
+        }
+        std::ofstream f(rep_db_path(db_dir_));
+        f << j.dump(2);
+    }
+    // Installed
     {
         json j;
         for (auto& [name, ver] : installed_) j[name] = ver;
@@ -112,6 +150,8 @@ void LocalDB::save() const {
         f << j.dump(2);
     }
 }
+
+// ── Package DB ────────────────────────────────────────────────────────────────
 
 void LocalDB::upsert_package(const PackageInfo& info) { packages_[info.name] = info; }
 
@@ -142,6 +182,8 @@ std::vector<PackageInfo> LocalDB::list_packages() const {
     return r;
 }
 
+// ── Server DB ─────────────────────────────────────────────────────────────────
+
 void LocalDB::upsert_server(const ServerInfo& info) { servers_[info.name] = info; }
 
 std::vector<ServerInfo> LocalDB::list_servers() const {
@@ -168,6 +210,26 @@ std::optional<ServerInfo> LocalDB::find_server(const std::string& name) const {
     if (it == servers_.end()) return std::nullopt;
     return it->second;
 }
+
+// ── Repo DB ───────────────────────────────────────────────────────────────────
+
+void LocalDB::upsert_repo(const RepoInfo& info) { repos_[info.name] = info; }
+
+void LocalDB::remove_repo(const std::string& name) { repos_.erase(name); }
+
+std::vector<RepoInfo> LocalDB::list_repos() const {
+    std::vector<RepoInfo> r;
+    for (auto& [n, ri] : repos_) r.push_back(ri);
+    return r;
+}
+
+std::optional<RepoInfo> LocalDB::find_repo(const std::string& name) const {
+    auto it = repos_.find(name);
+    if (it == repos_.end()) return std::nullopt;
+    return it->second;
+}
+
+// ── Installed tracking ─────────────────────────────────────────────────────────
 
 void LocalDB::mark_installed(const std::string& name, const std::string& version) {
     installed_[name] = version;

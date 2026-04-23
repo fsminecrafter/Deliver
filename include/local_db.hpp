@@ -26,6 +26,12 @@ public:
     std::vector<ServerInfo>    search_servers(const std::string& query) const;
     std::optional<ServerInfo>  find_server(const std::string& name) const;
 
+    // Repository DB (HTTP/HTTPS repos)
+    void upsert_repo(const RepoInfo& info);
+    void remove_repo(const std::string& name);
+    std::vector<RepoInfo>      list_repos() const;
+    std::optional<RepoInfo>    find_repo(const std::string& name) const;
+
     // Installed packages tracking
     void mark_installed(const std::string& pkg_name, const std::string& version);
     bool is_installed(const std::string& pkg_name) const;
@@ -35,6 +41,7 @@ private:
     std::string db_dir_;
     std::map<std::string, PackageInfo>  packages_;
     std::map<std::string, ServerInfo>   servers_;
+    std::map<std::string, RepoInfo>     repos_;
     std::map<std::string, std::string>  installed_; // name -> version
 };
 
