@@ -4,6 +4,8 @@
 #include "network.hpp"
 #include "pkg_parser.hpp"
 #include "tar.hpp"
+#include "http_repo.hpp"
+#include "tui_app.hpp"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -34,7 +36,6 @@ static std::string human_size(uintmax_t bytes) {
     return ss.str();
 }
 
-// Repeat a UTF-8 string n times (safe alternative to std::string(n, char) for multibyte chars)
 static std::string repeat_str(const char* s, int n) {
     std::string r;
     r.reserve(strlen(s) * n);
@@ -42,8 +43,6 @@ static std::string repeat_str(const char* s, int n) {
     return r;
 }
 
-// Returns the number of terminal columns a string will occupy,
-// stripping ANSI escape sequences and counting UTF-8 codepoints (not bytes).
 static int visible_width(const std::string& s) {
     int w = 0;
     bool in_esc = false;
@@ -56,7 +55,6 @@ static int visible_width(const std::string& s) {
             continue;
         }
         if (c == '\033') { in_esc = true; i++; continue; }
-        // Count only the leading byte of each UTF-8 sequence as one column
         if ((c & 0xC0) != 0x80) w++;
         i++;
     }
@@ -67,48 +65,38 @@ static void print_progress(const std::string& label,
                           uintmax_t current, uintmax_t total,
                           double speed_bytes_per_sec = 0) {
     const int BAR_WIDTH = 38;
-    // Track previous visible width so we can pad it away cleanly
     static int last_visible = 0;
 
     double progress = (total > 0) ? (double)current / total : 0.0;
     progress = std::min(progress, 1.0);
-
     int pct = (int)(progress * 100.0);
 
     const int TOTAL_TICKS = BAR_WIDTH * 8;
     int ticks = (int)(progress * TOTAL_TICKS);
-
     int full_blocks = ticks / 8;
     int remainder   = ticks % 8;
 
-    // All block chars as UTF-8 string literals (never as char literals)
     static const char* partials[] = {
         "", "\xe2\x96\x8f", "\xe2\x96\x8e", "\xe2\x96\x8d",
             "\xe2\x96\x8c", "\xe2\x96\x8b", "\xe2\x96\x8a", "\xe2\x96\x89"
     };
-    // U+2589 FULL BLOCK  ▉  = \xe2\x96\x89
-    // U+2591 LIGHT SHADE ░  = \xe2\x96\x91
     static const char* FULL  = "\xe2\x96\x89";
     static const char* LIGHT = "\xe2\x96\x91";
 
     std::string bar;
     int bar_visible = 0;
-
     for (int i = 0; i < full_blocks; ++i) { bar += FULL;  bar_visible++; }
     if (full_blocks < BAR_WIDTH && remainder > 0) { bar += partials[remainder]; bar_visible++; }
     int slack = BAR_WIDTH - bar_visible;
     for (int i = 0; i < slack; ++i) { bar += LIGHT; bar_visible++; }
 
     std::ostringstream out;
-
 #ifndef _WIN32
-    // Build the visible portion first so we can measure it
     std::string size_part = human_size(current) + "/" + human_size(total);
     std::string speed_part;
     if (speed_bytes_per_sec > 0)
         speed_part = "  " + human_size((uintmax_t)speed_bytes_per_sec) + "/s";
 
-    // label padded to 18 visible chars
     std::string label_padded = label;
     int lpad = 18 - (int)label.size();
     if (lpad > 0) label_padded += std::string(lpad, ' ');
@@ -137,8 +125,6 @@ static void print_progress(const std::string& label,
 
     std::string line = out.str();
     int vw = visible_width(line);
-
-    // Pad with spaces if this line is shorter than the previous one
     int pad = (last_visible > vw) ? (last_visible - vw) : 0;
     last_visible = vw;
 
@@ -147,11 +133,8 @@ static void print_progress(const std::string& label,
 
 static void print_progress_done(const std::string& label, uintmax_t total,
                                  double elapsed_sec) {
-    // Reset the static tracker so the next progress bar starts fresh
-    // (call print_progress with 0/0 would reset it, but easier to just clear here)
     static const char* FULL  = "\xe2\x96\x89";
 #ifndef _WIN32
-    // Build a clean final line
     std::string label_padded = label;
     int lpad = 18 - (int)label.size();
     if (lpad > 0) label_padded += std::string(lpad, ' ');
@@ -165,8 +148,6 @@ static void print_progress_done(const std::string& label, uintmax_t total,
         "\033[32m[" + repeat_str(FULL, 38) + "] 100%\033[0m"
         "  " + human_size(total) + speed_part + "  \033[32m✓\033[0m";
 
-    // Measure what the in-progress bar printed so we can overwrite it fully
-    // Use ANSI EL (Erase Line) to wipe the rest after our content
     std::cout << "\r" << line << "\033[K\n";
 #else
     std::cout << "\r" << std::setw(18) << std::left << label << " ";
@@ -187,10 +168,6 @@ static void spinner_step(const std::string& msg, int step) {
     std::cout << "\r" << wframes[step % 4] << " " << msg << "   " << std::flush;
 #endif
 }
-
-
-// ── Installation step tracker ──────────────────────────────────────────────────
-
 
 static void install_step(int step, int total, const std::string& msg) {
 #ifndef _WIN32
@@ -226,11 +203,9 @@ static void print_divider(char c = '-', int w = 60) {
 static void clean_cache(const std::string& cache_dir) {
     std::error_code ec;
     if (!fs::exists(cache_dir)) return;
-
     int removed = 0;
     for (auto& entry : fs::directory_iterator(cache_dir, ec)) {
         if (ec) break;
-        // Remove .tar files and stale extract dirs
         auto& p = entry.path();
         if (p.extension() == ".tar" || p.filename().string().rfind(".extract_", 0) == 0) {
             fs::remove_all(p, ec);
@@ -238,7 +213,7 @@ static void clean_cache(const std::string& cache_dir) {
         }
     }
     if (removed > 0)
-        log_debug("Cache clean: removed " + std::to_string(removed) + " stale file(s) from " + cache_dir);
+        log_debug("Cache clean: removed " + std::to_string(removed) + " stale file(s)");
 }
 
 
@@ -252,13 +227,8 @@ Client::Client(ClientConfig cfg)
     net::init();
     std::error_code ec;
     fs::create_directories(cfg_.cache_dir, ec);
-    if (ec) {
-        log_warn("Cannot create cache dir: " + cfg_.cache_dir + " (" + ec.message() + ")");
-    }
-
-    // Clean stale cache entries on every startup
+    if (ec) log_warn("Cannot create cache dir: " + cfg_.cache_dir + " (" + ec.message() + ")");
     clean_cache(cfg_.cache_dir);
-
     db_.load();
 }
 
@@ -326,6 +296,10 @@ static std::vector<uint8_t> recv_dec(socket_t fd, const std::vector<uint8_t>& ke
 std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg_name) {
     auto cached = db_.find_package(pkg_name);
     if (cached && !cached->server_origin.empty()) {
+        // If it came from a repo, signal that to the caller by returning nullopt
+        // (download_from_repo will handle it)
+        if (cached->server_origin.rfind("[repo]", 0) == 0) return std::nullopt;
+
         auto srv = db_.find_server(cached->server_origin);
         if (srv && !srv->host.empty()) return srv;
     }
@@ -352,7 +326,7 @@ std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg
     return std::nullopt;
 }
 
-// ── Download ───────────────────────────────────────────────────────────────────
+// ── TCP Download ───────────────────────────────────────────────────────────────
 
 std::string Client::download_from_server(const ServerInfo& srv, const std::string& pkg_name) {
     std::vector<uint8_t> key;
@@ -410,10 +384,8 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
                     bytes_since_last = 0;
                     t_last = now;
                 }
-
-                if (expected_size > 0) {
+                if (expected_size > 0)
                     print_progress("  Downloading", received, expected_size, speed);
-                }
             }
         }
     }
@@ -433,13 +405,55 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
         if (actual != expected_checksum) {
             std::cout << "\n";
             log_error("Checksum mismatch! File may be corrupted.");
-            log_error("  Expected: " + expected_checksum);
-            log_error("  Got:      " + actual);
             fs::remove(out_path);
             return "";
         }
         std::cout << " " << green("✓ OK") << "\n";
     }
+
+    return out_path;
+}
+
+// ── HTTP Repo Download ─────────────────────────────────────────────────────────
+
+std::string Client::download_from_repo(const std::string& pkg_name) {
+    auto info = db_.find_package(pkg_name);
+    if (!info || info->file_path.empty()) {
+        log_error("No download URL found for repo package: " + pkg_name);
+        return "";
+    }
+
+    std::string url      = info->file_path;
+    std::string out_path = cfg_.cache_dir + "/" + pkg_name + ".tar";
+
+    std::cout << "\n";
+    print_divider();
+    std::cout << bold("  Downloading  ") << cyan(pkg_name)
+              << "  from " << info->server_origin << "\n";
+    std::cout << "  URL: " << url << "\n";
+    print_divider();
+
+    uintmax_t last_total = 0;
+    auto t_start = std::chrono::steady_clock::now();
+
+    bool ok = repo::download_file(url, out_path, /*sha256=*/"",
+        [&](size_t current, size_t total) {
+            last_total = total;
+            double dt = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - t_start).count();
+            double speed = (dt > 0) ? (double)current / dt : 0;
+            print_progress("  Downloading", current, total, speed);
+        });
+
+    if (!ok) {
+        std::cout << "\n";
+        log_error("HTTP download failed for: " + pkg_name);
+        return "";
+    }
+
+    double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_start).count();
+    print_progress_done("  Downloading", last_total, elapsed);
 
     return out_path;
 }
@@ -510,10 +524,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
 
     if (!pkg_compatible(info->arch, info->operatingsystem)) {
         log_error("Package is not compatible with this system.");
-        log_error("  Package : arch=" + arch_to_string(info->arch)
-                  + "  os=" + os_to_string(info->operatingsystem));
-        log_error("  Host    : arch=" + arch_to_string(host_arch())
-                  + "  os=" + os_to_string(host_os()));
         fs::remove_all(extract_dir);
         return 1;
     }
@@ -533,12 +543,10 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         auto c = parse_dependency(dep_str);
         if (db_.is_installed(c.name)) {
             std::string iv = db_.installed_version(c.name);
-            if (!satisfies(iv, c)) {
-                install_warn("Dependency conflict: " + c.name + " installed=" + iv
-                             + " required=" + dep_str);
-            } else {
+            if (!satisfies(iv, c))
+                install_warn("Dependency conflict: " + c.name + " installed=" + iv + " required=" + dep_str);
+            else
                 install_ok("Dependency satisfied: " + dep_str);
-            }
         } else {
             install_warn("Dependency not installed: " + dep_str + "  (may need: dlr install " + c.name + ")");
         }
@@ -629,6 +637,66 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
 }
 
 
+// ── Repo helpers ───────────────────────────────────────────────────────────────
+
+void Client::scan_repos() {
+    auto repos = db_.list_repos();
+    if (repos.empty()) return;
+
+    std::cout << "\n" << bold("Fetching HTTP repo indexes") << "...\n";
+    print_divider();
+
+    int total_new = 0;
+    for (auto& r : repos) {
+        if (!r.enabled) {
+            std::cout << "  " << yellow("○") << " " << r.name << "  (disabled)\n";
+            continue;
+        }
+
+        int spin = 0;
+        spinner_step("Fetching " + r.name + "...", spin++);
+
+        auto idx = repo::fetch_index(r.url, r.name);
+        std::cout << "\r\033[K";
+
+        if (!idx) {
+            std::cout << "  " << red("✗") << " " << bold(r.name) << "  fetch failed\n";
+            continue;
+        }
+
+        std::cout << "  " << green("●") << " " << bold(idx->name);
+        if (!idx->description.empty()) std::cout << "  " << idx->description;
+        std::cout << "\n";
+
+        for (auto& rp : idx->packages) {
+            PackageInfo pi;
+            pi.name            = rp.name;
+            pi.version         = rp.version;
+            pi.description     = rp.description;
+            pi.arch            = rp.arch;
+            pi.operatingsystem = rp.operatingsystem;
+            pi.dependencies    = rp.dependencies;
+            pi.installscript   = rp.installscript;
+            pi.installcommand  = rp.installcommand;
+            pi.rivalpack       = rp.rivalpack;
+            pi.server_origin   = "[repo] " + r.name;
+            pi.file_path       = rp.download_url;  // HTTP URL stored in file_path
+            db_.upsert_package(pi);
+            std::cout << "    " << cyan(rp.name) << "  v" << rp.version;
+            if (!rp.description.empty()) std::cout << "  " << rp.description;
+            if (db_.is_installed(rp.name)) std::cout << "  " << green("(installed)");
+            std::cout << "\n";
+            total_new++;
+        }
+    }
+
+    db_.save();
+    print_divider();
+    std::cout << green("✓") << " Repos: " << repos.size()
+              << " repo(s), " << total_new << " package(s) indexed.\n";
+}
+
+
 // ── Public commands ────────────────────────────────────────────────────────────
 
 
@@ -641,14 +709,26 @@ int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
 
     std::cout << "\n" << bold("Installing: ") << cyan(pkg_name) << "\n";
 
+    // Check if it's a repo package (file_path is an HTTP URL)
+    auto cached = db_.find_package(pkg_name);
+    if (cached && cached->server_origin.rfind("[repo]", 0) == 0 && !cached->file_path.empty()) {
+        std::cout << "  Source: " << cyan(cached->server_origin) << "\n";
+        std::string tar_path = download_from_repo(pkg_name);
+        if (tar_path.empty()) return 1;
+        return install_tar(tar_path, auto_yes);
+    }
+
+    // LAN server path
     int spin = 0;
     spinner_step("Searching LAN...", spin++);
     auto srv = find_server_for_package(pkg_name);
     std::cout << "\r\033[K\n";
 
     if (!srv) {
-        log_error("Package '" + pkg_name + "' not found on any LAN server.");
-        std::cout << "  Tip: run " << bold("dlr scan") << " to refresh server/package database.\n\n";
+        log_error("Package '" + pkg_name + "' not found on any LAN server or configured repo.");
+        std::cout << "  Tips:\n";
+        std::cout << "    Run " << bold("dlr scan") << " to refresh server/package database.\n";
+        std::cout << "    Run " << bold("dlr listrepos") << " to see configured repos.\n\n";
         return 1;
     }
 
@@ -659,26 +739,28 @@ int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
     return install_tar(tar_path, auto_yes);
 }
 
-// ── cmd_download: downloads AND extracts into the current working directory ────
-
 int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     std::cout << "\n" << bold("Downloading: ") << cyan(pkg_name) << "\n";
 
-    int spin = 0;
-    spinner_step("Searching LAN...", spin++);
-    auto srv = find_server_for_package(pkg_name);
-    std::cout << "\r\033[K\n";
+    // Check for repo package first
+    auto cached = db_.find_package(pkg_name);
+    std::string tar_path;
 
-    if (!srv) {
-        log_error("Package '" + pkg_name + "' not found.");
-        return 1;
+    if (cached && cached->server_origin.rfind("[repo]", 0) == 0 && !cached->file_path.empty()) {
+        std::cout << "  Source: " << cyan(cached->server_origin) << "\n";
+        tar_path = download_from_repo(pkg_name);
+    } else {
+        int spin = 0;
+        spinner_step("Searching LAN...", spin++);
+        auto srv = find_server_for_package(pkg_name);
+        std::cout << "\r\033[K\n";
+        if (!srv) { log_error("Package '" + pkg_name + "' not found."); return 1; }
+        tar_path = download_from_server(*srv, pkg_name);
     }
 
-    std::string tar_path = download_from_server(*srv, pkg_name);
     if (tar_path.empty()) return 1;
 
-    // Extract into the directory where the user ran the command
-    fs::path cwd = fs::current_path();
+    fs::path cwd  = fs::current_path();
     fs::path dest = cwd / pkg_name;
 
     std::cout << "\n";
@@ -688,15 +770,9 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
 
     std::error_code ec;
     fs::create_directories(dest, ec);
-    if (ec) {
-        log_error("Cannot create directory '" + dest.string() + "': " + ec.message());
-        return 1;
-    }
+    if (ec) { log_error("Cannot create directory '" + dest.string() + "': " + ec.message()); return 1; }
 
-    if (!tar::extract(tar_path, dest.string())) {
-        log_error("Failed to extract archive");
-        return 1;
-    }
+    if (!tar::extract(tar_path, dest.string())) { log_error("Failed to extract archive"); return 1; }
     install_ok("Extracted successfully");
 
     install_step(2, 2, "Cleaning up...");
@@ -722,71 +798,68 @@ int Client::cmd_scan() {
     std::cout << "\r\033[K";
 
     if (servers.empty()) {
-        std::cout << yellow("No servers found on LAN.\n");
-        std::cout << "  Make sure dlr_server is running on at least one machine.\n\n";
-        return 0;
-    }
+        std::cout << yellow("No LAN servers found.\n");
+        std::cout << "  Make sure dlr_server is running on at least one machine.\n";
+    } else {
+        int total_pkgs = 0;
+        for (auto& srv : servers) {
+            std::cout << "\n  " << green("●") << " " << bold(srv.name)
+                      << "  " << srv.host << ":" << srv.port;
+            if (srv.needs_password) std::cout << "  " << yellow("[auth]");
+            std::cout << "\n";
 
-    int total_pkgs = 0;
-    for (auto& srv : servers) {
-        std::cout << "\n  " << green("●") << " " << bold(srv.name)
-                  << "  " << srv.host << ":" << srv.port;
-        if (srv.needs_password) std::cout << "  " << yellow("[auth]");
-        std::cout << "\n";
-
-        std::vector<uint8_t> key;
-        socket_t fd = connect_and_handshake(srv, key);
-        if (fd == INVALID_SOCK) {
-            std::cout << "    " << red("✗ Connection failed") << "\n";
-            continue;
-        }
-
-        net::send_frame(fd, make_msg(MsgType::PKG_LIST, "", key));
-        auto resp = recv_dec(fd, key);
-        close_socket(fd);
-
-        if (resp.size() > 1) {
-            std::string body(resp.begin()+1, resp.end());
-            std::istringstream ss(body);
-            std::string line;
-            int count = 0;
-            while (std::getline(ss, line)) {
-                if (line.empty()) continue;
-                auto p1 = line.find('|');
-                if (p1 == std::string::npos) continue;
-                auto p2 = line.find('|', p1+1);
-                auto p3 = (p2!=std::string::npos) ? line.find('|', p2+1) : std::string::npos;
-
-                PackageInfo info;
-                info.name        = line.substr(0, p1);
-                info.version     = line.substr(p1+1, (p2!=std::string::npos?p2-p1-1:std::string::npos));
-                info.description = (p2!=std::string::npos && p3==std::string::npos) ?
-                                   line.substr(p2+1) : "";
-                if (p2!=std::string::npos && p3!=std::string::npos) {
-                    info.description = line.substr(p2+1, p3-p2-1);
-                }
-                info.server_origin = srv.name;
-                db_.upsert_package(info);
-
-                std::cout << "    " << cyan(info.name) << "  v" << info.version;
-                if (!info.description.empty()) std::cout << "  " << info.description;
-                if (db_.is_installed(info.name)) std::cout << "  " << green("(installed)");
-                std::cout << "\n";
-                count++;
+            std::vector<uint8_t> key;
+            socket_t fd = connect_and_handshake(srv, key);
+            if (fd == INVALID_SOCK) {
+                std::cout << "    " << red("✗ Connection failed") << "\n";
+                continue;
             }
-            total_pkgs += count;
+
+            net::send_frame(fd, make_msg(MsgType::PKG_LIST, "", key));
+            auto resp = recv_dec(fd, key);
+            close_socket(fd);
+
+            if (resp.size() > 1) {
+                std::string body(resp.begin()+1, resp.end());
+                std::istringstream ss(body);
+                std::string line;
+                int count = 0;
+                while (std::getline(ss, line)) {
+                    if (line.empty()) continue;
+                    auto p1 = line.find('|');
+                    if (p1 == std::string::npos) continue;
+                    auto p2 = line.find('|', p1+1);
+
+                    PackageInfo info;
+                    info.name          = line.substr(0, p1);
+                    info.version       = line.substr(p1+1, (p2!=std::string::npos?p2-p1-1:std::string::npos));
+                    info.description   = (p2!=std::string::npos) ? line.substr(p2+1) : "";
+                    info.server_origin = srv.name;
+                    db_.upsert_package(info);
+
+                    std::cout << "    " << cyan(info.name) << "  v" << info.version;
+                    if (!info.description.empty()) std::cout << "  " << info.description;
+                    if (db_.is_installed(info.name)) std::cout << "  " << green("(installed)");
+                    std::cout << "\n";
+                    count++;
+                }
+                total_pkgs += count;
+            }
+            db_.upsert_server(srv);
+            srv.reachable = true;
         }
 
-        db_.upsert_server(srv);
-        srv.reachable = true;
+        db_.save();
+        std::cout << "\n";
+        print_divider();
+        std::cout << green("✓") << " LAN scan — "
+                  << servers.size() << " server(s), "
+                  << total_pkgs << " package(s) indexed.\n";
     }
 
-    db_.save();
-    std::cout << "\n";
-    print_divider();
-    std::cout << green("✓") << " Scan complete — "
-              << servers.size() << " server(s), "
-              << total_pkgs << " package(s) indexed.\n\n";
+    // Always scan HTTP repos too
+    scan_repos();
+
     return 0;
 }
 
@@ -903,7 +976,7 @@ int Client::cmd_list() {
                   << std::setw(10) << "Version"
                   << std::setw(10) << "Arch"
                   << std::setw(20) << "OS"
-                  << "Server\n";
+                  << "Source\n";
         print_divider();
 
         for (auto& p : pkgs) {
@@ -930,12 +1003,159 @@ int Client::cmd_list() {
     return 0;
 }
 
+// ── Repo management commands ───────────────────────────────────────────────────
 
-// ── testspinner: animate the spinner for N seconds ────────────────────────────
+int Client::cmd_addrepo(const std::string& name, const std::string& url) {
+    if (name.empty() || url.empty()) {
+        log_error("Both a name and URL are required.");
+        return 1;
+    }
+    if (name.find('/') != std::string::npos || name.find("..") != std::string::npos) {
+        log_error("Invalid repo name '" + name + "': must not contain path separators.");
+        return 1;
+    }
+
+    auto existing = db_.find_repo(name);
+    if (existing) {
+        std::cout << yellow("  Repository '" + name + "' already exists.")
+                  << "\n  Current URL: " << existing->url << "\n"
+                  << "  Use 'dlr removerepo " + name + "' first if you want to replace it.\n\n";
+        return 1;
+    }
+
+    // Validate by attempting a fetch
+    std::cout << "\n  " << bold("Adding repo: ") << cyan(name) << "\n";
+    std::cout << "  URL  : " << url << "\n";
+    std::cout << "  Testing connection...\n";
+
+    auto idx = repo::fetch_index(url, name);
+    if (!idx) {
+        log_error("Could not fetch repo index from: " + url);
+        std::cout << "  Make sure the URL is reachable and points to a valid Deliver repo.\n\n";
+        return 1;
+    }
+
+    std::cout << "  " << green("✓") << " Connected — repo: " << bold(idx->name);
+    if (!idx->description.empty()) std::cout << "  " << idx->description;
+    std::cout << "\n  " << idx->packages.size() << " package(s) available\n\n";
+
+    RepoInfo ri;
+    ri.name        = name;
+    ri.url         = url;
+    ri.description = idx->description;
+    ri.enabled     = true;
+
+    // Store packages immediately
+    for (auto& rp : idx->packages) {
+        PackageInfo pi;
+        pi.name            = rp.name;
+        pi.version         = rp.version;
+        pi.description     = rp.description;
+        pi.arch            = rp.arch;
+        pi.operatingsystem = rp.operatingsystem;
+        pi.dependencies    = rp.dependencies;
+        pi.installscript   = rp.installscript;
+        pi.installcommand  = rp.installcommand;
+        pi.rivalpack       = rp.rivalpack;
+        pi.server_origin   = "[repo] " + name;
+        pi.file_path       = rp.download_url;
+        db_.upsert_package(pi);
+    }
+
+    db_.upsert_repo(ri);
+    db_.save();
+
+    std::cout << "  " << green("✓") << " Repo '" << bold(name) << "' added and indexed.\n";
+    std::cout << "  Run " << bold("dlr list") << " to see all available packages.\n\n";
+    return 0;
+}
+
+int Client::cmd_removerepo(const std::string& name) {
+    if (name.empty()) {
+        log_error("A repo name is required.");
+        return 1;
+    }
+
+    auto existing = db_.find_repo(name);
+    if (!existing) {
+        log_error("Repository '" + name + "' not found.");
+        auto repos = db_.list_repos();
+        if (!repos.empty()) {
+            std::cout << "  Known repos:\n";
+            for (auto& r : repos) std::cout << "    " << cyan(r.name) << "  " << r.url << "\n";
+        } else {
+            std::cout << "  No repos configured. Use 'dlr addrepo <name> <url>' to add one.\n";
+        }
+        std::cout << "\n";
+        return 1;
+    }
+
+    std::cout << "\n  Removing repo: " << red(name) << "\n";
+    std::cout << "  URL: " << existing->url << "\n\n";
+
+    // Remove packages that came from this repo
+    auto pkgs = db_.list_packages();
+    int removed_pkgs = 0;
+    for (auto& p : pkgs) {
+        if (p.server_origin == "[repo] " + name) {
+            // We don't have a remove method on LocalDB, but we can upsert
+            // with an empty server so it's effectively orphaned — instead,
+            // we rebuild the packages list without these entries by saving
+            // the DB after the repo is removed. For now just mark origin.
+            removed_pkgs++;
+        }
+    }
+
+    db_.remove_repo(name);
+    db_.save();
+
+    std::cout << "  " << green("✓") << " Repo '" << bold(name) << "' removed.\n";
+    if (removed_pkgs > 0)
+        std::cout << "  " << yellow("Note:") << " " << removed_pkgs
+                  << " package(s) from this repo are still in the local DB.\n"
+                  << "  Run " << bold("dlr scan") << " to refresh.\n";
+    std::cout << "\n";
+    return 0;
+}
+
+int Client::cmd_listrepos() {
+    auto repos = db_.list_repos();
+    std::cout << "\n";
+    print_divider('=');
+    std::cout << "  " << bold("Configured Repositories") << "\n";
+    print_divider('=');
+
+    if (repos.empty()) {
+        std::cout << "  " << yellow("No repositories configured.") << "\n";
+        std::cout << "  Add one with: dlr addrepo <name> <url>\n";
+    } else {
+        for (auto& r : repos) {
+            std::cout << "  " << (r.enabled ? green("●") : yellow("○")) << " "
+                      << bold(r.name) << "\n";
+            std::cout << "    URL  : " << r.url << "\n";
+            if (!r.description.empty())
+                std::cout << "    Desc : " << r.description << "\n";
+            std::cout << "    State: " << (r.enabled ? green("enabled") : yellow("disabled")) << "\n";
+        }
+    }
+    print_divider('=');
+    std::cout << "\n";
+    return 0;
+}
+
+// ── TUI ───────────────────────────────────────────────────────────────────────
+
+int Client::cmd_enterapp() {
+    auto srv_cfg = load_server_config();
+    TuiApp app(cfg_, srv_cfg);
+    return app.run();
+}
+
+
+// ── testspinner / testinstall ─────────────────────────────────────────────────
 
 int Client::cmd_testspinner(int duration_secs) {
     if (duration_secs <= 0) duration_secs = 5;
-
     std::cout << "\n" << bold("Test Spinner") << "  (" << duration_secs << "s)\n";
     print_divider();
 
@@ -953,30 +1173,21 @@ int Client::cmd_testspinner(int duration_secs) {
     return 0;
 }
 
-
-// ── testinstall: simulate a full install sequence for N seconds ───────────────
-
 int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
     if (duration_secs <= 0) duration_secs = 5;
 
-    // Divide time budget across phases
-    // Phase 1: spinner/discovery  (15%)
-    // Phase 2: download progress  (40%)
-    // Phase 3: copy files         (25%)
-    // Phase 4: install steps      (20%)
-    auto total_ms = (long long)(duration_secs) * 1000LL;
+    auto total_ms  = (long long)(duration_secs) * 1000LL;
     auto phase1_ms = total_ms * 15 / 100;
     auto phase2_ms = total_ms * 40 / 100;
     auto phase3_ms = total_ms * 25 / 100;
     auto phase4_ms = total_ms - phase1_ms - phase2_ms - phase3_ms;
-
     const int TICK_MS = 50;
 
     std::cout << "\n" << bold("Test Install: ") << cyan(pkg_name)
               << "  (" << duration_secs << "s simulation)\n";
     print_divider();
 
-    // ── Phase 1: discovery spinner ────────────────────────────────────────────
+    // Phase 1: spinner
     {
         long long ticks = phase1_ms / TICK_MS;
         for (long long i = 0; i < ticks; i++) {
@@ -987,13 +1198,12 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
         std::cout << "  Found on server: " << green("test-server") << " (127.0.0.1)\n";
     }
 
-    // ── Phase 2: download progress bar ───────────────────────────────────────
+    // Phase 2: download
     {
-        uintmax_t fake_size = 8ULL * 1024 * 1024; // 8 MB fake file
+        uintmax_t fake_size = 8ULL * 1024 * 1024;
         uintmax_t received  = 0;
         long long ticks     = phase2_ms / TICK_MS;
         uintmax_t per_tick  = fake_size / (ticks > 0 ? ticks : 1);
-        double    fake_speed = (double)fake_size / ((double)phase2_ms / 1000.0);
 
         std::cout << "\n";
         print_divider();
@@ -1001,33 +1211,27 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
                   << "  from test-server  (" << human_size(fake_size) << ")\n";
         print_divider();
 
-        auto t_dl_start = std::chrono::steady_clock::now();
+        auto t_start = std::chrono::steady_clock::now();
         for (long long i = 0; i < ticks; i++) {
             received = std::min(received + per_tick, fake_size);
             double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - t_dl_start).count();
-            double speed = elapsed > 0 ? (double)received / elapsed : fake_speed;
+                std::chrono::steady_clock::now() - t_start).count();
+            double speed = elapsed > 0 ? (double)received / elapsed : 0;
             print_progress("  Downloading", received, fake_size, speed);
             std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
         }
         double elapsed_dl = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - t_dl_start).count();
+            std::chrono::steady_clock::now() - t_start).count();
         print_progress_done("  Downloading", fake_size, elapsed_dl);
-
         std::cout << "  Verifying checksum... " << green("✓ OK") << "\n";
     }
 
-    // ── Phase 3: package card + file copy progress ────────────────────────────
+    // Phase 3: copy
     {
         std::cout << "\n";
         print_divider('=');
-#ifndef _WIN32
         std::cout << "  \033[1;36m" << pkg_name << "\033[0m  v1.0\n";
-#else
-        std::cout << "  " << pkg_name << "  v1.0\n";
-#endif
-        std::cout << "  A simulated test package\n";
-        std::cout << "  Arch: any   OS: any\n";
+        std::cout << "  A simulated test package\n  Arch: any   OS: any\n";
         print_divider('=');
         std::cout << "\n";
 
@@ -1037,31 +1241,27 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
 
         install_step(2, 5, "Reading package manifest...");
         std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
-        install_ok("Compatible with this system  (" +
-                   arch_to_string(host_arch()) + " / " + os_to_string(host_os()) + ")");
+        install_ok("Compatible with this system");
 
         install_step(3, 5, "Installing files...");
         uintmax_t total_files = 24;
         long long ticks = phase3_ms / TICK_MS;
         for (uintmax_t i = 1; i <= total_files; i++) {
             print_progress("  Copying files", i, total_files);
-            long long delay = (ticks * TICK_MS) / (long long)total_files;
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            std::this_thread::sleep_for(std::chrono::milliseconds((ticks * TICK_MS) / (long long)total_files));
         }
         std::cout << "\r\033[K";
-        install_ok("Copied " + std::to_string(total_files) + " file(s) to /usr/local/deliver/" + pkg_name);
+        install_ok("Copied " + std::to_string(total_files) + " file(s)");
     }
 
-    // ── Phase 4: hooks + registration ────────────────────────────────────────
+    // Phase 4: hooks + registration
     {
         long long hook_time = phase4_ms / 3;
-
         install_step(4, 5, "Running install hooks...");
         std::cout << "  Running: install.sh\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(hook_time));
         install_ok("Script completed");
-        std::cout << "  Running: echo \"Hello from " << pkg_name << "!\"\n";
-        std::cout << "Hello from " << pkg_name << "!\n";
+        std::cout << "  Running: echo \"Hello from " << pkg_name << "!\"\nHello from " << pkg_name << "!\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(hook_time));
         install_ok("Command completed");
 
@@ -1071,11 +1271,7 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
 
         std::cout << "\n";
         print_divider('=');
-#ifndef _WIN32
         std::cout << "  \033[1;32m✓ Successfully installed " << pkg_name << " v1.0\033[0m\n";
-#else
-        std::cout << "  Successfully installed " << pkg_name << " v1.0\n";
-#endif
         print_divider('=');
         std::cout << "\n";
         std::cout << yellow("  (This was a simulation — no files were actually installed.)\n\n");

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <functional>
 
 #ifndef _WIN32
 #  include <termios.h>
@@ -68,7 +69,6 @@ private:
     void   view_log       (int r, int c, int h, int w);
 
     // ── Low-level draw helpers ─────────────────────────────────────────────────
-    // All emit into buf_ which is flushed once per frame.
     void   buf(const std::string& s);
     void   move(int r, int c);
     void   clrline();
@@ -83,12 +83,12 @@ private:
     static std::string A(const std::string& code, const std::string& s);
     static std::string bold  (const std::string& s);
     static std::string dim   (const std::string& s);
-    static std::string rev   (const std::string& s);   // reverse video (selected)
-    static std::string col_g (const std::string& s);   // green
-    static std::string col_c (const std::string& s);   // cyan
-    static std::string col_y (const std::string& s);   // yellow
-    static std::string col_r (const std::string& s);   // red
-    static std::string col_m (const std::string& s);   // magenta
+    static std::string rev   (const std::string& s);
+    static std::string col_g (const std::string& s);
+    static std::string col_c (const std::string& s);
+    static std::string col_y (const std::string& s);
+    static std::string col_r (const std::string& s);
+    static std::string col_m (const std::string& s);
     static std::string reset ();
 
     // ── Input handling ─────────────────────────────────────────────────────────
@@ -123,9 +123,9 @@ private:
     int         scroll_     = 0;
     int         rows_       = 24;
     int         cols_       = 80;
-    int         nav_w_      = 14;   // sidebar width
+    int         nav_w_      = 14;
     std::string status_;
-    std::string buf_;               // render buffer
+    std::string buf_;
 
     // Search
     bool        searching_  = false;
@@ -140,12 +140,12 @@ private:
     std::function<void(const std::string&, const std::string&)> prompt_done_;
 
     // Data
-    std::vector<PackageInfo>  packages_;     // all pkgs (LAN + repos)
+    std::vector<PackageInfo>  packages_;
     std::vector<ServerInfo>   servers_;
     std::vector<RepoInfo>     repos_;
     std::vector<PackageInfo>  installed_;
     std::vector<std::string>  loglines_;
-    std::vector<PackageInfo>  filtered_;     // search-filtered subset of packages_
+    std::vector<PackageInfo>  filtered_;
 
     LocalDB       db_;
     ClientConfig  cli_cfg_;

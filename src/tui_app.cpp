@@ -216,6 +216,10 @@ void TuiApp::draw_row(int r, int c, int w, const std::string& s,
 
 void TuiApp::render() {
     buf_.clear();
+
+    // Clear full screen and move cursor to top-left
+    buf_ += "\033[2J\033[H";
+
     buf_ += "\033[?25l";  // hide cursor
 
     term_size(rows_, cols_);

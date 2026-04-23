@@ -46,9 +46,7 @@ inline std::string color(const std::string& text, const char* code) {
 #endif
 }
 
-inline std::string red(const std::string& text) {
-    return color(text, "\033[31m");
-}
+inline std::string red(const std::string& text) { return color(text, "\033[31m"); }
 
 static void usage() {
     print_banner();
@@ -56,13 +54,21 @@ static void usage() {
 Usage: dlr [command] [options] [args...]
 
 CLIENT COMMANDS
-  install  [-y] <pkg>          Install a package from any LAN server
+  install  [-y] <pkg>          Install a package from any LAN server or repo
   download [-y] <pkg>          Download + extract a package to current directory
-  scan                         Discover LAN servers + refresh package DB
+  scan                         Discover LAN servers + fetch repo indexes
   list                         List all known packages
   ping     <server>            Ping a server by name (4 pings)
   search   <query>             Search local package database
   servers  [query]             Show known servers
+
+REPOSITORY COMMANDS
+  addrepo    <name> <url>      Add an HTTP/HTTPS package repository
+  removerepo <name>            Remove a configured repository
+  listrepos                    List all configured repositories
+
+TUI
+  enterapp                     Launch the interactive TUI package browser
 
 SERVER COMMANDS  (requires sudo)
   status                       Show server status and package list
@@ -92,7 +98,8 @@ OPTIONS
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static bool require_args(const std::vector<std::string>& args, size_t n, const std::string& usage_hint) {
+static bool require_args(const std::vector<std::string>& args, size_t n,
+                          const std::string& usage_hint) {
     if (args.size() < n) {
         std::cerr << red("Error: ") << "Not enough arguments for '" << args[0] << "'.\n";
         std::cerr << "  Usage: " << usage_hint << "\n\n";
@@ -269,6 +276,24 @@ int main(int argc, char** argv) {
         return client.cmd_servers(q);
     }
 
+    // ── Repo commands ──────────────────────────────────────────────────────────
+    if (cmd == "addrepo") {
+        if (!require_args(args, 3, "dlr addrepo <name> <url>")) return 1;
+        return client.cmd_addrepo(args[1], args[2]);
+    }
+    if (cmd == "removerepo") {
+        if (!require_args(args, 2, "dlr removerepo <name>")) return 1;
+        return client.cmd_removerepo(args[1]);
+    }
+    if (cmd == "listrepos") {
+        return client.cmd_listrepos();
+    }
+
+    // ── TUI ───────────────────────────────────────────────────────────────────
+    if (cmd == "enterapp") {
+        return client.cmd_enterapp();
+    }
+
     // ── Test / diagnostic commands ────────────────────────────────────────────
     if (cmd == "testspinner") {
         int secs = 5;
@@ -277,7 +302,6 @@ int main(int argc, char** argv) {
         }
         if (secs <= 0) {
             std::cerr << red("Error: ") << "Duration must be a positive integer.\n";
-            std::cerr << "  Usage: dlr testspinner <seconds>\n\n";
             return 1;
         }
         return client.cmd_testspinner(secs);
@@ -289,7 +313,6 @@ int main(int argc, char** argv) {
         try { secs = std::stoi(args[2]); } catch (...) {}
         if (secs <= 0) {
             std::cerr << red("Error: ") << "Duration must be a positive integer.\n";
-            std::cerr << "  Usage: dlr testinstall <name> <seconds>\n\n";
             return 1;
         }
         return client.cmd_testinstall(args[1], secs);
