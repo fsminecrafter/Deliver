@@ -18,6 +18,8 @@ public:
     int cmd_search(const std::string& query);
     int cmd_servers(const std::string& query);
     int cmd_list();
+    int cmd_testinstall(const std::string& pkg_name, int duration_secs);
+    int cmd_testspinner(int duration_secs);
 
 private:
     std::optional<ServerInfo> find_server_for_package(const std::string& pkg_name);
