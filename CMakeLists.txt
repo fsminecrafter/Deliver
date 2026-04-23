@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deliver VERSION 1.0.0 LANGUAGES CXX)
+project(deliver VERSION 1.0.1 LANGUAGES CXX)
 
 # Single source of truth: version always comes from project() above.
 # Both binaries get DLR_VERSION so version.hpp never needs a hard-coded fallback.
