@@ -33,11 +33,41 @@ static std::string human_size(uintmax_t bytes) {
     return ss.str();
 }
 
+// Repeat a UTF-8 string n times (safe alternative to std::string(n, char) for multibyte chars)
+static std::string repeat_str(const char* s, int n) {
+    std::string r;
+    r.reserve(strlen(s) * n);
+    for (int i = 0; i < n; i++) r += s;
+    return r;
+}
+
+// Returns the number of terminal columns a string will occupy,
+// stripping ANSI escape sequences and counting UTF-8 codepoints (not bytes).
+static int visible_width(const std::string& s) {
+    int w = 0;
+    bool in_esc = false;
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        if (in_esc) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) in_esc = false;
+            i++;
+            continue;
+        }
+        if (c == '\033') { in_esc = true; i++; continue; }
+        // Count only the leading byte of each UTF-8 sequence as one column
+        if ((c & 0xC0) != 0x80) w++;
+        i++;
+    }
+    return w;
+}
+
 static void print_progress(const std::string& label,
                           uintmax_t current, uintmax_t total,
                           double speed_bytes_per_sec = 0) {
     const int BAR_WIDTH = 38;
-    static size_t last_line_length = 0;
+    // Track previous visible width so we can pad it away cleanly
+    static int last_visible = 0;
 
     double progress = (total > 0) ? (double)current / total : 0.0;
     progress = std::min(progress, 1.0);
@@ -50,79 +80,101 @@ static void print_progress(const std::string& label,
     int full_blocks = ticks / 8;
     int remainder   = ticks % 8;
 
+    // All block chars as UTF-8 string literals (never as char literals)
     static const char* partials[] = {
-        "", "▏","▎","▍","▌","▋","▊","▉"
+        "", "\xe2\x96\x8f", "\xe2\x96\x8e", "\xe2\x96\x8d",
+            "\xe2\x96\x8c", "\xe2\x96\x8b", "\xe2\x96\x8a", "\xe2\x96\x89"
     };
+    // U+2589 FULL BLOCK  ▉  = \xe2\x96\x89
+    // U+2591 LIGHT SHADE ░  = \xe2\x96\x91
+    static const char* FULL  = "\xe2\x96\x89";
+    static const char* LIGHT = "\xe2\x96\x91";
 
     std::string bar;
-    int visible_width = 0;
+    int bar_visible = 0;
 
-    for (int i = 0; i < full_blocks; ++i) {
-        bar += "▉";
-        visible_width++;
-    }
-
-    if (full_blocks < BAR_WIDTH && remainder > 0) {
-        bar += partials[remainder];
-        visible_width++;
-    }
-
-    int remaining = BAR_WIDTH - visible_width;
-    for (int i = 0; i < remaining; ++i) {
-        bar += "░";
-    }
+    for (int i = 0; i < full_blocks; ++i) { bar += FULL;  bar_visible++; }
+    if (full_blocks < BAR_WIDTH && remainder > 0) { bar += partials[remainder]; bar_visible++; }
+    int slack = BAR_WIDTH - bar_visible;
+    for (int i = 0; i < slack; ++i) { bar += LIGHT; bar_visible++; }
 
     std::ostringstream out;
 
 #ifndef _WIN32
-    out << "\033[36m" << std::setw(18) << std::left << label << "\033[0m ";
-    out << "\033[90m[\033[0m";
-    out << "\033[32m" << bar << "\033[0m";
-    out << "\033[90m]\033[0m";
-    out << " \033[1m" << std::setw(3) << pct << "%\033[0m";
-    out << "  " << human_size(current) << "/" << human_size(total);
-
+    // Build the visible portion first so we can measure it
+    std::string size_part = human_size(current) + "/" + human_size(total);
+    std::string speed_part;
     if (speed_bytes_per_sec > 0)
-        out << "  \033[33m"
-            << human_size((uintmax_t)speed_bytes_per_sec)
-            << "/s\033[0m";
+        speed_part = "  " + human_size((uintmax_t)speed_bytes_per_sec) + "/s";
+
+    // label padded to 18 visible chars
+    std::string label_padded = label;
+    int lpad = 18 - (int)label.size();
+    if (lpad > 0) label_padded += std::string(lpad, ' ');
+
+    char pct_buf[8];
+    snprintf(pct_buf, sizeof(pct_buf), "%3d%%", pct);
+
+    out << "\033[36m" << label_padded << "\033[0m "
+        << "\033[90m[\033[0m"
+        << "\033[32m" << bar << "\033[0m"
+        << "\033[90m]\033[0m"
+        << " \033[1m" << pct_buf << "\033[0m"
+        << "  " << size_part
+        << "\033[33m" << speed_part << "\033[0m";
 #else
     int filled = (int)(BAR_WIDTH * progress);
     out << std::setw(18) << std::left << label << " ";
     out << "[" << std::string(filled,'=')
         << std::string(BAR_WIDTH-filled,' ') << "]";
-    out << " " << std::setw(3) << pct << "%";
+    char pct_buf[8]; snprintf(pct_buf, sizeof(pct_buf), "%3d%%", pct);
+    out << " " << pct_buf;
     out << "  " << human_size(current) << "/" << human_size(total);
+    if (speed_bytes_per_sec > 0)
+        out << "  " << human_size((uintmax_t)speed_bytes_per_sec) << "/s";
 #endif
 
     std::string line = out.str();
+    int vw = visible_width(line);
 
-    size_t pad = 0;
-    if (last_line_length > line.size())
-        pad = last_line_length - line.size();
+    // Pad with spaces if this line is shorter than the previous one
+    int pad = (last_visible > vw) ? (last_visible - vw) : 0;
+    last_visible = vw;
 
     std::cout << "\r" << line << std::string(pad, ' ') << std::flush;
-
-    last_line_length = line.size();
 }
 
 static void print_progress_done(const std::string& label, uintmax_t total,
                                  double elapsed_sec) {
-    std::cout << "\r";
+    // Reset the static tracker so the next progress bar starts fresh
+    // (call print_progress with 0/0 would reset it, but easier to just clear here)
+    static const char* FULL  = "\xe2\x96\x89";
 #ifndef _WIN32
-    std::cout << "\033[36m" << std::setw(18) << std::left << label << "\033[0m ";
-    std::cout << "\033[32m[";
-    std::cout << std::string(38, '▉') << "] 100%\033[0m";
-    std::cout << "  " << human_size(total);
-    if (elapsed_sec > 0)
-        std::cout << "  \033[33m" << human_size((uintmax_t)(total/elapsed_sec)) << "/s\033[0m";
-    std::cout << "  \033[32m✓\033[0m";
+    // Build a clean final line
+    std::string label_padded = label;
+    int lpad = 18 - (int)label.size();
+    if (lpad > 0) label_padded += std::string(lpad, ' ');
+
+    std::string speed_part;
+    if (elapsed_sec > 0 && total > 0)
+        speed_part = "  \033[33m" + human_size((uintmax_t)((double)total / elapsed_sec)) + "/s\033[0m";
+
+    std::string line =
+        "\033[36m" + label_padded + "\033[0m "
+        "\033[32m[" + repeat_str(FULL, 38) + "] 100%\033[0m"
+        "  " + human_size(total) + speed_part + "  \033[32m✓\033[0m";
+
+    // Measure what the in-progress bar printed so we can overwrite it fully
+    // Use ANSI EL (Erase Line) to wipe the rest after our content
+    std::cout << "\r" << line << "\033[K\n";
 #else
-    std::cout << std::setw(18) << std::left << label << " ";
+    std::cout << "\r" << std::setw(18) << std::left << label << " ";
     std::cout << "[" << std::string(38,'=') << "] 100%";
-    std::cout << "  " << human_size(total) << "  OK";
+    std::cout << "  " << human_size(total);
+    if (elapsed_sec > 0 && total > 0)
+        std::cout << "  " << human_size((uintmax_t)((double)total / elapsed_sec)) << "/s";
+    std::cout << "  OK\033[K\n";
 #endif
-    std::cout << "\n";
 }
 
 static void spinner_step(const std::string& msg, int step) {
@@ -517,7 +569,7 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         print_progress("  Copying files", copied, total_files);
     }
     if (total_files > 0) {
-        std::cout << "\r";
+        std::cout << "\r\033[K";
         install_ok("Copied " + std::to_string(total_files) + " file(s) to " + install_path.string());
     }
 
@@ -591,7 +643,7 @@ int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
     int spin = 0;
     spinner_step("Searching LAN...", spin++);
     auto srv = find_server_for_package(pkg_name);
-    std::cout << "\r" << std::string(50, ' ') << "\r";
+    std::cout << "\r\033[K\n";
 
     if (!srv) {
         log_error("Package '" + pkg_name + "' not found on any LAN server.");
@@ -614,7 +666,7 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     int spin = 0;
     spinner_step("Searching LAN...", spin++);
     auto srv = find_server_for_package(pkg_name);
-    std::cout << "\r" << std::string(50, ' ') << "\r";
+    std::cout << "\r\033[K\n";
 
     if (!srv) {
         log_error("Package '" + pkg_name + "' not found.");
@@ -666,7 +718,7 @@ int Client::cmd_scan() {
     }
 
     auto servers = net::discover_servers(3000);
-    std::cout << "\r" << std::string(50,' ') << "\r";
+    std::cout << "\r\033[K";
 
     if (servers.empty()) {
         std::cout << yellow("No servers found on LAN.\n");
@@ -894,7 +946,7 @@ int Client::cmd_testspinner(int duration_secs) {
         spinner_step("Running spinner test... (" + std::to_string(remaining_ms / 1000 + 1) + "s)", frame++);
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
     }
-    std::cout << "\r" << std::string(60, ' ') << "\r";
+    std::cout << "\r\033[K";
     print_divider();
     std::cout << green("✓") << " Spinner test complete.\n\n";
     return 0;
@@ -930,7 +982,7 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
             spinner_step("Searching LAN for '" + pkg_name + "'...", (int)i);
             std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
         }
-        std::cout << "\r" << std::string(60, ' ') << "\r";
+        std::cout << "\r\033[K";
         std::cout << "  Found on server: " << green("test-server") << " (127.0.0.1)\n";
     }
 
@@ -995,7 +1047,7 @@ int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
             long long delay = (ticks * TICK_MS) / (long long)total_files;
             std::this_thread::sleep_for(std::chrono::milliseconds(delay));
         }
-        std::cout << "\r";
+        std::cout << "\r\033[K";
         install_ok("Copied " + std::to_string(total_files) + " file(s) to /usr/local/deliver/" + pkg_name);
     }
 
