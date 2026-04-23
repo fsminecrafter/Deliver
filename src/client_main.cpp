@@ -57,7 +57,7 @@ Usage: dlr [command] [options] [args...]
 
 CLIENT COMMANDS
   install  [-y] <pkg>          Install a package from any LAN server
-  download [-y] <pkg>          Download a package .tar without installing
+  download [-y] <pkg>          Download + extract a package to current directory
   scan                         Discover LAN servers + refresh package DB
   list                         List all known packages
   ping     <server>            Ping a server by name (4 pings)
@@ -76,6 +76,10 @@ SERVER COMMANDS  (requires sudo)
   unpresentfolder [-y] <name>         Remove a folder-based package from server
   removepackage  [-y] <name>          Remove any package from server
   clear          [-y]                 Remove ALL packages from this server
+
+TESTING / DIAGNOSTICS
+  testinstall <name> <secs>    Simulate a full install UI for <secs> seconds
+  testspinner <secs>           Animate the spinner widget for <secs> seconds
 
 OPTIONS
   -y, --yes      Auto-confirm all prompts
@@ -129,14 +133,12 @@ int main(int argc, char** argv) {
     auto srv_cfg = dlr::load_server_config();
     if (srv_cfg.name.empty()) srv_cfg.name = "deliver-server";
 
-    // ── status ────────────────────────────────────────────────────────────────
     if (cmd == "status") {
         dlr::Server srv(srv_cfg);
         srv.print_status();
         return 0;
     }
 
-    // ── restart ───────────────────────────────────────────────────────────────
     if (cmd == "restart") {
         std::cout << "Restarting Deliver server...\n";
         int r = system("systemctl restart deliver-server 2>/dev/null");
@@ -145,7 +147,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ── presentfile ───────────────────────────────────────────────────────────
     if (cmd == "presentfile") {
         if (!require_args(args, 3, "sudo dlr presentfile [-y] <file> <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -153,7 +154,6 @@ int main(int argc, char** argv) {
         return reg.present_file(args[1], args[2], auto_yes) ? 0 : 1;
     }
 
-    // ── presentfolder ─────────────────────────────────────────────────────────
     if (cmd == "presentfolder") {
         if (!require_args(args, 3, "sudo dlr presentfolder [-y] <folder> <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -161,7 +161,6 @@ int main(int argc, char** argv) {
         return reg.present_folder(args[1], args[2], auto_yes) ? 0 : 1;
     }
 
-    // ── attach ────────────────────────────────────────────────────────────────
     if (cmd == "attach") {
         if (!require_args(args, 3, "sudo dlr attach <pkg_file> <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -169,7 +168,6 @@ int main(int argc, char** argv) {
         return reg.attach_pkg(args[1], args[2]) ? 0 : 1;
     }
 
-    // ── generate ──────────────────────────────────────────────────────────────
     if (cmd == "generate") {
         if (!require_args(args, 3, "sudo dlr generate <pkg_file> <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -177,7 +175,6 @@ int main(int argc, char** argv) {
         return reg.generate_pkg(args[1], args[2]) ? 0 : 1;
     }
 
-    // ── make ──────────────────────────────────────────────────────────────────
     if (cmd == "make") {
         if (!require_args(args, 3, "sudo dlr make <pkg_file> <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -185,7 +182,6 @@ int main(int argc, char** argv) {
         return reg.make_pkg(args[1], args[2]) ? 0 : 1;
     }
 
-    // ── removepackage ─────────────────────────────────────────────────────────
     if (cmd == "removepackage") {
         if (!require_args(args, 2, "sudo dlr removepackage [-y] <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -193,7 +189,6 @@ int main(int argc, char** argv) {
         return reg.remove_package(args[1], auto_yes) ? 0 : 1;
     }
 
-    // ── unpresentfile ─────────────────────────────────────────────────────────
     if (cmd == "unpresentfile") {
         if (!require_args(args, 2, "sudo dlr unpresentfile [-y] <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -201,7 +196,6 @@ int main(int argc, char** argv) {
         return reg.unpresent_file(args[1], auto_yes) ? 0 : 1;
     }
 
-    // ── unpresentfolder ───────────────────────────────────────────────────────
     if (cmd == "unpresentfolder") {
         if (!require_args(args, 2, "sudo dlr unpresentfolder [-y] <name>")) return 1;
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
@@ -209,14 +203,12 @@ int main(int argc, char** argv) {
         return reg.unpresent_folder(args[1], auto_yes) ? 0 : 1;
     }
 
-    // ── clear ─────────────────────────────────────────────────────────────────
     if (cmd == "clear") {
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
         reg.load();
         return reg.clear_all(auto_yes) ? 0 : 1;
     }
 
-    // ── server-side list (root / env override) ────────────────────────────────
     if (cmd == "list" && (getuid() == 0 || getenv("DLR_SERVER_LIST"))) {
         dlr::PackageRegistry reg(srv_cfg.registry_file, srv_cfg.data_dir);
         reg.load();
@@ -275,6 +267,32 @@ int main(int argc, char** argv) {
     if (cmd == "servers") {
         std::string q = (args.size() >= 2) ? args[1] : "";
         return client.cmd_servers(q);
+    }
+
+    // ── Test / diagnostic commands ────────────────────────────────────────────
+    if (cmd == "testspinner") {
+        int secs = 5;
+        if (args.size() >= 2) {
+            try { secs = std::stoi(args[1]); } catch (...) {}
+        }
+        if (secs <= 0) {
+            std::cerr << red("Error: ") << "Duration must be a positive integer.\n";
+            std::cerr << "  Usage: dlr testspinner <seconds>\n\n";
+            return 1;
+        }
+        return client.cmd_testspinner(secs);
+    }
+
+    if (cmd == "testinstall") {
+        if (!require_args(args, 3, "dlr testinstall <name> <seconds>")) return 1;
+        int secs = 0;
+        try { secs = std::stoi(args[2]); } catch (...) {}
+        if (secs <= 0) {
+            std::cerr << red("Error: ") << "Duration must be a positive integer.\n";
+            std::cerr << "  Usage: dlr testinstall <name> <seconds>\n\n";
+            return 1;
+        }
+        return client.cmd_testinstall(args[1], secs);
     }
 
     std::cerr << "\n  " << dlr::red("Unknown command: ") << cmd << "\n";
