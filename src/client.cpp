@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 namespace dlr {
 
 
-// Progress bar renderer
+// ── Progress bar renderer ──────────────────────────────────────────────────────
 
 
 static std::string human_size(uintmax_t bytes) {
@@ -44,7 +44,6 @@ static void print_progress(const std::string& label,
 
     int pct = (int)(progress * 100.0);
 
-    // Smooth resolution (8 levels per cell)
     const int TOTAL_TICKS = BAR_WIDTH * 8;
     int ticks = (int)(progress * TOTAL_TICKS);
 
@@ -58,19 +57,16 @@ static void print_progress(const std::string& label,
     std::string bar;
     int visible_width = 0;
 
-    // Full blocks
     for (int i = 0; i < full_blocks; ++i) {
         bar += "▉";
         visible_width++;
     }
 
-    // Partial block
     if (full_blocks < BAR_WIDTH && remainder > 0) {
         bar += partials[remainder];
         visible_width++;
     }
 
-    // Fill rest with light shade
     int remaining = BAR_WIDTH - visible_width;
     for (int i = 0; i < remaining; ++i) {
         bar += "░";
@@ -140,7 +136,7 @@ static void spinner_step(const std::string& msg, int step) {
 }
 
 
-// Installation step tracker
+// ── Installation step tracker ──────────────────────────────────────────────────
 
 
 static void install_step(int step, int total, const std::string& msg) {
@@ -167,8 +163,33 @@ static void install_warn(const std::string& msg) {
 #endif
 }
 
+static void print_divider(char c = '-', int w = 60) {
+    std::cout << std::string(w, c) << "\n";
+}
 
-// Client ctor
+
+// ── Cache cleanup ──────────────────────────────────────────────────────────────
+
+static void clean_cache(const std::string& cache_dir) {
+    std::error_code ec;
+    if (!fs::exists(cache_dir)) return;
+
+    int removed = 0;
+    for (auto& entry : fs::directory_iterator(cache_dir, ec)) {
+        if (ec) break;
+        // Remove .tar files and stale extract dirs
+        auto& p = entry.path();
+        if (p.extension() == ".tar" || p.filename().string().rfind(".extract_", 0) == 0) {
+            fs::remove_all(p, ec);
+            if (!ec) removed++;
+        }
+    }
+    if (removed > 0)
+        log_debug("Cache clean: removed " + std::to_string(removed) + " stale file(s) from " + cache_dir);
+}
+
+
+// ── Client ctor ────────────────────────────────────────────────────────────────
 
 
 Client::Client(ClientConfig cfg)
@@ -176,19 +197,20 @@ Client::Client(ClientConfig cfg)
     , db_(cfg_.db_dir)
 {
     net::init();
-    // ← change this:
-    fs::create_directories(cfg_.cache_dir);
-    // ← to this:
     std::error_code ec;
     fs::create_directories(cfg_.cache_dir, ec);
     if (ec) {
         log_warn("Cannot create cache dir: " + cfg_.cache_dir + " (" + ec.message() + ")");
     }
+
+    // Clean stale cache entries on every startup
+    clean_cache(cfg_.cache_dir);
+
     db_.load();
 }
 
 
-// Internal helpers
+// ── Internal helpers ───────────────────────────────────────────────────────────
 
 
 static socket_t connect_and_handshake(const ServerInfo& srv,
@@ -246,21 +268,15 @@ static std::vector<uint8_t> recv_dec(socket_t fd, const std::vector<uint8_t>& ke
     return frame;
 }
 
-static void print_divider(char c = '-', int w = 60) {
-    std::cout << std::string(w, c) << "\n";
-}
-
-// Server discovery
+// ── Server discovery ───────────────────────────────────────────────────────────
 
 std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg_name) {
-    // 1. Check cached server info
     auto cached = db_.find_package(pkg_name);
     if (cached && !cached->server_origin.empty()) {
         auto srv = db_.find_server(cached->server_origin);
         if (srv && !srv->host.empty()) return srv;
     }
 
-    // 2. Live LAN discovery (includes localhost probe via discover_servers)
     auto servers = net::discover_servers(2500);
     for (auto& srv : servers) {
         std::vector<uint8_t> key;
@@ -283,7 +299,7 @@ std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg
     return std::nullopt;
 }
 
-// Download
+// ── Download ───────────────────────────────────────────────────────────────────
 
 std::string Client::download_from_server(const ServerInfo& srv, const std::string& pkg_name) {
     std::vector<uint8_t> key;
@@ -308,7 +324,6 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
         if (msg.empty()) { log_error("Connection lost during download"); break; }
 
         MsgType type = (MsgType)msg[0];
-        // body is binary so use data pointer + size
         const char* body_data = (const char*)msg.data() + 1;
         size_t body_len = msg.size() - 1;
         std::string body_str(body_data, body_len);
@@ -358,7 +373,6 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
         print_progress_done("  Downloading", received, elapsed);
     }
 
-    // Verify checksum
     if (!expected_checksum.empty()) {
         std::cout << "  Verifying checksum...";
         std::cout << std::flush;
@@ -378,7 +392,7 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
 }
 
 
-// Install from tar
+// ── Install from tar ───────────────────────────────────────────────────────────
 
 
 int Client::install_tar(const std::string& tar_path, bool auto_yes) {
@@ -388,7 +402,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     fs::remove_all(extract_dir);
     fs::create_directories(extract_dir);
 
-    // Step 1: Extract
     install_step(1, TOTAL_STEPS, "Extracting package archive...");
     if (!tar::extract(tar_path, extract_dir)) {
         log_error("Failed to extract package archive");
@@ -397,7 +410,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     }
     install_ok("Extracted successfully");
 
-    // Find .pkg
     std::string pkg_file;
     for (auto& e : fs::recursive_directory_iterator(extract_dir)) {
         if (e.path().extension() == ".pkg") {
@@ -415,12 +427,10 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         return 1;
     }
 
-    // Step 2: Parse manifest
     install_step(2, TOTAL_STEPS, "Reading package manifest...");
     auto info = parse_pkg(pkg_file);
     if (!info) { fs::remove_all(extract_dir); return 1; }
 
-    // Print package card
     std::cout << "\n";
     print_divider('=');
 #ifndef _WIN32
@@ -445,7 +455,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     print_divider('=');
     std::cout << "\n";
 
-    // Compatibility check
     if (!pkg_compatible(info->arch, info->operatingsystem)) {
         log_error("Package is not compatible with this system.");
         log_error("  Package : arch=" + arch_to_string(info->arch)
@@ -458,7 +467,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
     install_ok("Compatible with this system  ("
                + arch_to_string(host_arch()) + " / " + os_to_string(host_os()) + ")");
 
-    // Rival check
     if (!info->rivalpack.empty() && db_.is_installed(info->rivalpack)) {
         install_warn("Rival package '" + info->rivalpack + "' is already installed — conflicts possible.");
         if (!auto_yes) {
@@ -468,8 +476,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         }
     }
 
-    // Dependency check (against installed db)
-    bool deps_ok = true;
     for (auto& dep_str : info->dependencies) {
         auto c = parse_dependency(dep_str);
         if (db_.is_installed(c.name)) {
@@ -477,7 +483,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
             if (!satisfies(iv, c)) {
                 install_warn("Dependency conflict: " + c.name + " installed=" + iv
                              + " required=" + dep_str);
-                deps_ok = false;
             } else {
                 install_ok("Dependency satisfied: " + dep_str);
             }
@@ -492,12 +497,10 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         if (ans != "y" && ans != "Y") { std::cout << "  Aborted.\n"; fs::remove_all(extract_dir); return 1; }
     }
 
-    // Step 3: Copy files
     install_step(3, TOTAL_STEPS, "Installing files...");
     fs::path install_path = fs::path(cfg_.install_dir) / info->name;
     fs::create_directories(install_path);
 
-    // Collect files to copy
     std::vector<fs::path> files_to_copy;
     for (auto& e : fs::recursive_directory_iterator(extract_dir)) {
         if (fs::is_regular_file(e) && e.path().extension() != ".pkg")
@@ -518,7 +521,6 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
         install_ok("Copied " + std::to_string(total_files) + " file(s) to " + install_path.string());
     }
 
-    // Step 4: Run install script
     install_step(4, TOTAL_STEPS, "Running install hooks...");
     bool ran_anything = false;
 
@@ -552,14 +554,12 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
 
     if (!ran_anything) install_ok("No install hooks defined");
 
-    // Step 5: Register
     install_step(5, TOTAL_STEPS, "Registering package...");
     db_.mark_installed(info->name, info->version);
     db_.upsert_package(*info);
     db_.save();
     install_ok("Registered " + info->name + " v" + info->version);
 
-    // Cleanup
     fs::remove_all(extract_dir);
 
     std::cout << "\n";
@@ -576,7 +576,7 @@ int Client::install_tar(const std::string& tar_path, bool auto_yes) {
 }
 
 
-// Public commands
+// ── Public commands ────────────────────────────────────────────────────────────
 
 
 int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
@@ -606,6 +606,8 @@ int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
     return install_tar(tar_path, auto_yes);
 }
 
+// ── cmd_download: downloads AND extracts into the current working directory ────
+
 int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     std::cout << "\n" << bold("Downloading: ") << cyan(pkg_name) << "\n";
 
@@ -622,7 +624,34 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     std::string tar_path = download_from_server(*srv, pkg_name);
     if (tar_path.empty()) return 1;
 
-    std::cout << "\n" << green("✓ Saved to: ") << tar_path << "\n\n";
+    // Extract into the directory where the user ran the command
+    fs::path cwd = fs::current_path();
+    fs::path dest = cwd / pkg_name;
+
+    std::cout << "\n";
+    print_divider();
+    install_step(1, 2, "Extracting package to current directory...");
+    std::cout << "  Destination: " << dest.string() << "\n";
+
+    std::error_code ec;
+    fs::create_directories(dest, ec);
+    if (ec) {
+        log_error("Cannot create directory '" + dest.string() + "': " + ec.message());
+        return 1;
+    }
+
+    if (!tar::extract(tar_path, dest.string())) {
+        log_error("Failed to extract archive");
+        return 1;
+    }
+    install_ok("Extracted successfully");
+
+    install_step(2, 2, "Cleaning up...");
+    fs::remove(tar_path, ec);
+    install_ok("Done");
+
+    print_divider();
+    std::cout << "\n" << green("✓ Package extracted to: ") << bold(dest.string()) << "\n\n";
     return 0;
 }
 
@@ -682,7 +711,6 @@ int Client::cmd_scan() {
                                    line.substr(p2+1) : "";
                 if (p2!=std::string::npos && p3!=std::string::npos) {
                     info.description = line.substr(p2+1, p3-p2-1);
-                    // could decode arch/os here if server sends it
                 }
                 info.server_origin = srv.name;
                 db_.upsert_package(info);
@@ -715,7 +743,6 @@ int Client::cmd_ping(const std::string& server_name) {
     if (srv_opt) {
         srv = *srv_opt;
     } else {
-        // Try live discovery
         auto servers = net::discover_servers(2000);
         bool found = false;
         for (auto& s : servers) {
@@ -818,7 +845,6 @@ int Client::cmd_list() {
         std::cout << "  " << yellow("No packages in database.") << "\n";
         std::cout << "  Run " << bold("dlr scan") << " to discover packages.\n";
     } else {
-        // Header
         std::cout << "  " << std::left
                   << std::setw(22) << bold("Name")
                   << std::setw(10) << "Version"
@@ -848,6 +874,160 @@ int Client::cmd_list() {
 
     print_divider('=');
     std::cout << "\n";
+    return 0;
+}
+
+
+// ── testspinner: animate the spinner for N seconds ────────────────────────────
+
+int Client::cmd_testspinner(int duration_secs) {
+    if (duration_secs <= 0) duration_secs = 5;
+
+    std::cout << "\n" << bold("Test Spinner") << "  (" << duration_secs << "s)\n";
+    print_divider();
+
+    auto t_end = std::chrono::steady_clock::now() + std::chrono::seconds(duration_secs);
+    int frame = 0;
+    while (std::chrono::steady_clock::now() < t_end) {
+        int remaining_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_end - std::chrono::steady_clock::now()).count();
+        spinner_step("Running spinner test... (" + std::to_string(remaining_ms / 1000 + 1) + "s)", frame++);
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+    std::cout << "\r" << std::string(60, ' ') << "\r";
+    print_divider();
+    std::cout << green("✓") << " Spinner test complete.\n\n";
+    return 0;
+}
+
+
+// ── testinstall: simulate a full install sequence for N seconds ───────────────
+
+int Client::cmd_testinstall(const std::string& pkg_name, int duration_secs) {
+    if (duration_secs <= 0) duration_secs = 5;
+
+    // Divide time budget across phases
+    // Phase 1: spinner/discovery  (15%)
+    // Phase 2: download progress  (40%)
+    // Phase 3: copy files         (25%)
+    // Phase 4: install steps      (20%)
+    auto total_ms = (long long)(duration_secs) * 1000LL;
+    auto phase1_ms = total_ms * 15 / 100;
+    auto phase2_ms = total_ms * 40 / 100;
+    auto phase3_ms = total_ms * 25 / 100;
+    auto phase4_ms = total_ms - phase1_ms - phase2_ms - phase3_ms;
+
+    const int TICK_MS = 50;
+
+    std::cout << "\n" << bold("Test Install: ") << cyan(pkg_name)
+              << "  (" << duration_secs << "s simulation)\n";
+    print_divider();
+
+    // ── Phase 1: discovery spinner ────────────────────────────────────────────
+    {
+        long long ticks = phase1_ms / TICK_MS;
+        for (long long i = 0; i < ticks; i++) {
+            spinner_step("Searching LAN for '" + pkg_name + "'...", (int)i);
+            std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
+        }
+        std::cout << "\r" << std::string(60, ' ') << "\r";
+        std::cout << "  Found on server: " << green("test-server") << " (127.0.0.1)\n";
+    }
+
+    // ── Phase 2: download progress bar ───────────────────────────────────────
+    {
+        uintmax_t fake_size = 8ULL * 1024 * 1024; // 8 MB fake file
+        uintmax_t received  = 0;
+        long long ticks     = phase2_ms / TICK_MS;
+        uintmax_t per_tick  = fake_size / (ticks > 0 ? ticks : 1);
+        double    fake_speed = (double)fake_size / ((double)phase2_ms / 1000.0);
+
+        std::cout << "\n";
+        print_divider();
+        std::cout << bold("  Downloading  ") << cyan(pkg_name)
+                  << "  from test-server  (" << human_size(fake_size) << ")\n";
+        print_divider();
+
+        auto t_dl_start = std::chrono::steady_clock::now();
+        for (long long i = 0; i < ticks; i++) {
+            received = std::min(received + per_tick, fake_size);
+            double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - t_dl_start).count();
+            double speed = elapsed > 0 ? (double)received / elapsed : fake_speed;
+            print_progress("  Downloading", received, fake_size, speed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
+        }
+        double elapsed_dl = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t_dl_start).count();
+        print_progress_done("  Downloading", fake_size, elapsed_dl);
+
+        std::cout << "  Verifying checksum... " << green("✓ OK") << "\n";
+    }
+
+    // ── Phase 3: package card + file copy progress ────────────────────────────
+    {
+        std::cout << "\n";
+        print_divider('=');
+#ifndef _WIN32
+        std::cout << "  \033[1;36m" << pkg_name << "\033[0m  v1.0\n";
+#else
+        std::cout << "  " << pkg_name << "  v1.0\n";
+#endif
+        std::cout << "  A simulated test package\n";
+        std::cout << "  Arch: any   OS: any\n";
+        print_divider('=');
+        std::cout << "\n";
+
+        install_step(1, 5, "Extracting package archive...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS * 2));
+        install_ok("Extracted successfully");
+
+        install_step(2, 5, "Reading package manifest...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(TICK_MS));
+        install_ok("Compatible with this system  (" +
+                   arch_to_string(host_arch()) + " / " + os_to_string(host_os()) + ")");
+
+        install_step(3, 5, "Installing files...");
+        uintmax_t total_files = 24;
+        long long ticks = phase3_ms / TICK_MS;
+        for (uintmax_t i = 1; i <= total_files; i++) {
+            print_progress("  Copying files", i, total_files);
+            long long delay = (ticks * TICK_MS) / (long long)total_files;
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        }
+        std::cout << "\r";
+        install_ok("Copied " + std::to_string(total_files) + " file(s) to /usr/local/deliver/" + pkg_name);
+    }
+
+    // ── Phase 4: hooks + registration ────────────────────────────────────────
+    {
+        long long hook_time = phase4_ms / 3;
+
+        install_step(4, 5, "Running install hooks...");
+        std::cout << "  Running: install.sh\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(hook_time));
+        install_ok("Script completed");
+        std::cout << "  Running: echo \"Hello from " << pkg_name << "!\"\n";
+        std::cout << "Hello from " << pkg_name << "!\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(hook_time));
+        install_ok("Command completed");
+
+        install_step(5, 5, "Registering package...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(hook_time));
+        install_ok("Registered " + pkg_name + " v1.0");
+
+        std::cout << "\n";
+        print_divider('=');
+#ifndef _WIN32
+        std::cout << "  \033[1;32m✓ Successfully installed " << pkg_name << " v1.0\033[0m\n";
+#else
+        std::cout << "  Successfully installed " << pkg_name << " v1.0\n";
+#endif
+        print_divider('=');
+        std::cout << "\n";
+        std::cout << yellow("  (This was a simulation — no files were actually installed.)\n\n");
+    }
+
     return 0;
 }
 
