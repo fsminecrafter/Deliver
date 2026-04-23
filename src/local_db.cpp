@@ -229,10 +229,61 @@ std::optional<RepoInfo> LocalDB::find_repo(const std::string& name) const {
     return it->second;
 }
 
+// ── Installed packages tracking ───────────────────────────────────────────────
+
+std::vector<PackageInfo> LocalDB::list_installed() const {
+    std::vector<PackageInfo> result;
+
+    for (const auto& [name, version] : installed_) {
+        PackageInfo info;
+
+        // Try to get full package info if it exists
+        auto it = packages_.find(name);
+        if (it != packages_.end()) {
+            info = it->second;
+        } else {
+            // Fallback (prevents ghost garbage)
+            info.name = name;
+            info.version = version;
+            info.description = "";
+            info.server_origin = "[unknown]";
+        }
+
+        // Always override version with installed version
+        info.version = version;
+
+        result.push_back(info);
+    }
+
+    return result;
+}
+
+void LocalDB::remove_packages_from_server(const std::string& server_name)
+{
+    for (auto it = packages_.begin(); it != packages_.end(); )
+    {
+        // PackageInfo is stored in it->second
+        const PackageInfo& pkg = it->second;
+
+        if (pkg.server_origin == server_name)
+        {
+            it = packages_.erase(it); // safe erase while iterating
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 // ── Installed tracking ─────────────────────────────────────────────────────────
 
 void LocalDB::mark_installed(const std::string& name, const std::string& version) {
     installed_[name] = version;
+}
+
+void LocalDB::unmark_installed(const std::string& name) {
+    installed_.erase(name);
 }
 
 bool LocalDB::is_installed(const std::string& name) const {

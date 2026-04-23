@@ -318,9 +318,35 @@ void ServerTuiApp::draw_gauge(int r, int c, int w,
                                const std::string& detail) {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
-    int bar_w = w - 22;
-    if (bar_w < 4) bar_w = 4;
-    int filled = (int)(bar_w * pct / 100.0);
+
+    int bar_w = std::max(4, w - 22);
+    double filled_f = (pct / 100.0) * bar_w;
+    int filled = (int)filled_f;
+
+    static const char* blocks[] = {
+        " ", "▏","▎","▍","▌","▋","▊","▉","█"
+    };
+
+    std::string bar;
+    bar.reserve(bar_w * 3);
+
+    int i = 0;
+    for (; i < filled; i++) {
+        bar += "█";
+    }
+
+    double partial = filled_f - filled;
+    if (i < bar_w) {
+        int idx = (int)(partial * 8.0);
+        if (idx > 0 && idx < 8) {
+            bar += blocks[idx];
+            i++;
+        }
+    }
+
+    for (; i < bar_w; i++) {
+        bar += "·";
+    }
 
     std::string color;
     if (pct >= 90) color = "\033[31m";
@@ -330,10 +356,12 @@ void ServerTuiApp::draw_gauge(int r, int c, int w,
     move(r, c);
     buf_ += "\033[36m" + pad_right(label, 12) + "\033[0m ";
     buf_ += "\033[90m[\033[0m";
-    buf_ += color + std::string(filled, '#') + "\033[0m";
-    buf_ += "\033[90m" + std::string(bar_w - filled, '·') + "]\033[0m";
+    buf_ += color + bar + "\033[0m";
+    buf_ += "\033[90m]\033[0m";
+
     char pct_buf[16];
     snprintf(pct_buf, sizeof(pct_buf), " %5.1f%%", pct);
+
     buf_ += "\033[1m" + std::string(pct_buf) + "\033[0m";
     buf_ += "  " + dim(trunc(detail, w - bar_w - 22));
 }
@@ -465,103 +493,130 @@ void ServerTuiApp::view_dashboard(int top, int left, int h, int w) {
 
     int gauge_w = std::min(w-2, 70);
 
-    // CPU
-    draw_gauge(r++, left+1, gauge_w, stats_.cpu_percent, "CPU",
+    // ── CPU ─────────────────────────────────────────────
+    draw_gauge(r++, left+1, gauge_w,
+               stats_.cpu_percent,
+               "CPU",
                std::to_string((int)stats_.cpu_percent) + "%");
-    // CPU sparkline
-    move(r++, left+14);
-    buf_ += dim("hist: ");
-    draw_sparkline(r-1, left+20, gauge_w-20, cpu_hist_, 100.0);
 
     move(r++, left); clrline();
 
-    // RAM
+    // ── RAM (NOW PERCENT ONLY) ──────────────────────────
     double ram_pct = (stats_.ram_total_mb > 0)
-                     ? stats_.ram_used_mb / stats_.ram_total_mb * 100.0 : 0.0;
-    std::ostringstream ram_detail;
-    ram_detail << std::fixed << std::setprecision(0)
-               << stats_.ram_used_mb << " / " << stats_.ram_total_mb << " MB";
-    draw_gauge(r++, left+1, gauge_w, ram_pct, "RAM", ram_detail.str());
+        ? (stats_.ram_used_mb / stats_.ram_total_mb) * 100.0
+        : 0.0;
+
+    draw_gauge(r++, left+1, gauge_w,
+               ram_pct,
+               "RAM",
+               std::to_string((int)ram_pct) + "%");
 
     move(r++, left); clrline();
 
-    // Storage
+    // ── Storage ─────────────────────────────────────────
     double stor_pct = (stats_.storage_total_gb > 0)
-                      ? stats_.storage_used_gb / stats_.storage_total_gb * 100.0 : 0.0;
+        ? (stats_.storage_used_gb / stats_.storage_total_gb) * 100.0
+        : 0.0;
+
     std::ostringstream stor_detail;
     stor_detail << std::fixed << std::setprecision(1)
-                << stats_.storage_used_gb << " / " << stats_.storage_total_gb << " GB";
-    draw_gauge(r++, left+1, gauge_w, stor_pct, "Storage", stor_detail.str());
+                << stats_.storage_used_gb << " / "
+                << stats_.storage_total_gb << " GB";
+
+    draw_gauge(r++, left+1, gauge_w,
+               stor_pct,
+               "Storage",
+               stor_detail.str());
 
     move(r++, left); clrline();
 
-    // CPU Temperature
+    // ── CPU TEMP ────────────────────────────────────────
     move(r, left+1);
     buf_ += "\033[36m" + pad_right("CPU Temp", 12) + "\033[0m ";
+
     if (stats_.cpu_temp_c >= 0) {
         std::string tc_color = (stats_.cpu_temp_c >= 80) ? "\033[31m"
-                             : (stats_.cpu_temp_c >= 65) ? "\033[33m" : "\033[32m";
-        std::ostringstream ts; ts << std::fixed << std::setprecision(1) << stats_.cpu_temp_c << " °C";
+                             : (stats_.cpu_temp_c >= 65) ? "\033[33m"
+                             : "\033[32m";
+
+        std::ostringstream ts;
+        ts << std::fixed << std::setprecision(1)
+           << stats_.cpu_temp_c << " °C";
+
         buf_ += tc_color + bold(ts.str()) + "\033[0m";
     } else {
         buf_ += dim("N/A");
     }
-    clrline(); r++;
+
+    clrline();
+    r++;
 
     move(r++, left); clrline();
     hline(r++, left, w-1);
 
-    // Network
+    // ── NETWORK ────────────────────────────────────────
     move(r++, left);
     buf_ += bold("  NETWORK");
 
     // RX
-    double rx_max = *std::max_element(rx_hist_.begin(), rx_hist_.end());
-    if (rx_max < 1024) rx_max = 1024;
     move(r, left+1);
     buf_ += "\033[36m" + pad_right("↓ Download", 12) + "\033[0m ";
     buf_ += "\033[32m" + bold(human_rate(stats_.net_rx_rate)) + "\033[0m";
     buf_ += "  " + dim("total: " + human_size(stats_.net_rx_bytes));
-    clrline(); r++;
+    clrline();
+    r++;
+
     move(r++, left+14);
-    draw_sparkline(r-1, left+14, gauge_w-14, rx_hist_, rx_max);
+    draw_sparkline(r-1, left+14, gauge_w-14, rx_hist_, 1024.0);
 
     move(r++, left); clrline();
 
     // TX
-    double tx_max = *std::max_element(tx_hist_.begin(), tx_hist_.end());
-    if (tx_max < 1024) tx_max = 1024;
     move(r, left+1);
     buf_ += "\033[36m" + pad_right("↑ Upload", 12) + "\033[0m ";
     buf_ += "\033[33m" + bold(human_rate(stats_.net_tx_rate)) + "\033[0m";
     buf_ += "  " + dim("total: " + human_size(stats_.net_tx_bytes));
-    clrline(); r++;
+    clrline();
+    r++;
+
     move(r++, left+14);
-    draw_sparkline(r-1, left+14, gauge_w-14, tx_hist_, tx_max);
+    draw_sparkline(r-1, left+14, gauge_w-14, tx_hist_, 1024.0);
 
     move(r++, left); clrline();
     hline(r++, left, w-1);
 
-    // Server info box
+    // ── SERVER INFO ─────────────────────────────────────
     move(r++, left);
     buf_ += bold("  SERVER INFO");
+
     move(r++, left+2);
     buf_ += "\033[36mName     \033[0m  " + srv_cfg_.name; clrline();
+
     move(r++, left+2);
-    buf_ += "\033[36mPort     \033[0m  " + std::to_string(srv_cfg_.port) + " (TCP)"; clrline();
+    buf_ += "\033[36mPort     \033[0m  " + std::to_string(srv_cfg_.port) + " (TCP)";
+    clrline();
+
     move(r++, left+2);
-    buf_ += "\033[36mDiscovery\033[0m  " + std::to_string(DISCOVERY_PORT) + " (UDP broadcast)"; clrline();
+    buf_ += "\033[36mDiscovery\033[0m  " + std::to_string(DISCOVERY_PORT) + " (UDP)";
+    clrline();
+
     move(r++, left+2);
     buf_ += "\033[36mAuth     \033[0m  ";
-    buf_ += srv_cfg_.needs_password ? col_y("Password required") : col_g("Open (no auth)");
+    buf_ += srv_cfg_.needs_password ? col_y("Password required") : col_g("Open");
     clrline();
-    move(r++, left+2);
-    buf_ += "\033[36mPackages \033[0m  " + std::to_string(packages_.size()) + " presented"; clrline();
-    move(r++, left+2);
-    buf_ += "\033[36mData dir \033[0m  " + srv_cfg_.data_dir; clrline();
 
-    // Clear remaining
-    for (; r <= top+h-1; r++) { move(r, left); clrline(); }
+    move(r++, left+2);
+    buf_ += "\033[36mPackages \033[0m  " + std::to_string(packages_.size());
+    clrline();
+
+    move(r++, left+2);
+    buf_ += "\033[36mData dir \033[0m  " + srv_cfg_.data_dir;
+    clrline();
+
+    for (; r <= top + h - 1; r++) {
+        move(r, left);
+        clrline();
+    }
 }
 
 // ── Packages view ─────────────────────────────────────────────────────────────

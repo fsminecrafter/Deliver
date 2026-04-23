@@ -13,6 +13,7 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <unordered_set>
 
 #ifndef _WIN32
 #  include <sys/ioctl.h>
@@ -597,6 +598,32 @@ void TuiApp::view_log(int top, int left, int h, int w) {
     }
 }
 
+void TuiApp::do_untrack_selected() {
+    if (installed_.empty() || sel_ >= (int)installed_.size())
+        return;
+
+    const std::string name = installed_[sel_].name;
+
+    term_restore();
+    std::cout << "\033[2J\033[H";
+    std::cout << "\033[1;36mUntracking: " << name << "\033[0m\n\n";
+
+    db_.unmark_installed(name);
+    db_.save();
+
+    std::cout << "Done.\n\nPress any key to continue...";
+    std::cout.flush();
+
+    term_raw();
+    term_read();
+
+    load_data();
+
+    set_status("Untracked: " + name);
+
+    dirty_ = true;
+}
+
 // ── Input handling ─────────────────────────────────────────────────────────────
 
 void TuiApp::handle_key(int k) {
@@ -646,11 +673,8 @@ void TuiApp::handle_key(int k) {
             else if (k==TK_ESC||k==127||k=='d'||k=='D'||k==0x7f) { do_remove_repo(); }
             break;
         case View::Installed:
-            if (k=='r'||k=='R') {
-                if (!installed_.empty() && sel_ < (int)installed_.size()) {
-                    set_status("Removed tracking for " + installed_[sel_].name);
-                    tlog("Untracked: " + installed_[sel_].name);
-                }
+            if (k == 'r' || k == 'R') {
+                do_untrack_selected();
             }
             break;
         default: break;
@@ -760,43 +784,63 @@ void TuiApp::do_scan() {
 
 void TuiApp::do_install_selected() {
     const auto& list = searching_ ? filtered_ : packages_;
-    if (list.empty() || sel_ >= (int)list.size()) return;
-    auto& p = list[sel_];
+    if (list.empty() || sel_ < 0 || sel_ >= (int)list.size()) return;
+
+    const auto p = list[sel_];
 
     term_restore();
     std::cout << "\033[2J\033[H";
     std::cout << "\033[1;36mInstalling: " << p.name << "\033[0m\n\n";
+    std::cout << std::flush;
 
     Client cli(cli_cfg_);
-    cli.cmd_install(p.name, false);
+    int rc = cli.cmd_install(p.name, false);
 
     std::cout << "\nPress any key to continue...";
     std::cout.flush();
     term_raw();
     term_read();
+
     load_data();
     dirty_ = true;
-    tlog("Installed: " + p.name);
+
+    if (rc == 0) {
+        set_status("Installed: " + p.name);
+        tlog("Installed: " + p.name);
+    } else {
+        set_status("Install cancelled/failed: " + p.name);
+        tlog("Install cancelled/failed: " + p.name);
+    }
 }
 
 void TuiApp::do_download_selected() {
     const auto& list = searching_ ? filtered_ : packages_;
-    if (list.empty() || sel_ >= (int)list.size()) return;
-    auto& p = list[sel_];
+    if (list.empty() || sel_ < 0 || sel_ >= (int)list.size()) return;
+
+    const auto p = list[sel_];
 
     term_restore();
     std::cout << "\033[2J\033[H";
     std::cout << "\033[1;36mDownloading: " << p.name << "\033[0m\n\n";
+    std::cout << std::flush;
 
     Client cli(cli_cfg_);
-    cli.cmd_download(p.name, false);
+    int rc = cli.cmd_download(p.name, false);
 
     std::cout << "\nPress any key to continue...";
     std::cout.flush();
     term_raw();
     term_read();
+
     dirty_ = true;
-    tlog("Downloaded: " + p.name);
+
+    if (rc == 0) {
+        set_status("Downloaded: " + p.name);
+        tlog("Downloaded: " + p.name);
+    } else {
+        set_status("Download cancelled/failed: " + p.name);
+        tlog("Download cancelled/failed: " + p.name);
+    }
 }
 
 void TuiApp::do_ping_selected() {
@@ -858,12 +902,64 @@ void TuiApp::do_remove_repo() {
 
 void TuiApp::load_data() {
     db_.load();
+
     packages_  = db_.list_packages();
     servers_   = db_.list_servers();
     repos_     = db_.list_repos();
-    installed_.clear();
-    for (auto& p : packages_)
-        if (db_.is_installed(p.name)) installed_.push_back(p);
+    installed_ = db_.list_installed();
+
+    // ── Sanitize packages ───────────────────────────────
+    packages_.erase(
+        std::remove_if(packages_.begin(), packages_.end(),
+            [](const PackageInfo& p) {
+                return p.name.empty();
+            }),
+        packages_.end()
+    );
+
+    // ── Sanitize servers ────────────────────────────────
+    servers_.erase(
+        std::remove_if(servers_.begin(), servers_.end(),
+            [](const ServerInfo& s) {
+                return s.name.empty() || s.host.empty();
+            }),
+        servers_.end()
+    );
+
+    // ── Sanitize repos ──────────────────────────────────
+    repos_.erase(
+        std::remove_if(repos_.begin(), repos_.end(),
+            [](const RepoInfo& r) {
+                return r.name.empty() || r.url.empty();
+            }),
+        repos_.end()
+    );
+
+    // ── Sanitize installed ──────────────────────────────
+    installed_.erase(
+        std::remove_if(installed_.begin(), installed_.end(),
+            [](const PackageInfo& p) {
+                return p.name.empty();
+            }),
+        installed_.end()
+    );
+
+    // ── Remove duplicate installed entries (extra safety)
+    {
+        std::unordered_set<std::string> seen;
+        installed_.erase(
+            std::remove_if(installed_.begin(), installed_.end(),
+                [&](const PackageInfo& p) {
+                    return !seen.insert(p.name).second;
+                }),
+            installed_.end()
+        );
+    }
+
+    // ── Clamp selection + scroll to avoid ghost UI states
+    sel_    = std::max(0, std::min(sel_, list_size() - 1));
+    scroll_ = std::max(0, scroll_);
+
     rebuild_filtered();
 }
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deliver VERSION 1.0.2 LANGUAGES CXX)
+project(deliver VERSION 1.0.3 LANGUAGES CXX)
 
 # Single source of truth: version always comes from project() above.
 add_compile_definitions(DLR_VERSION="${PROJECT_VERSION}")
@@ -49,6 +49,7 @@ add_executable(dlr
     src/package_registry.cpp
     src/http_repo.cpp
     src/tui_app.cpp
+    src/server_tui.cpp
 )
 
 target_link_libraries(dlr

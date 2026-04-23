@@ -337,10 +337,15 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
 
     std::string out_path = cfg_.cache_dir + "/" + pkg_name + ".tar";
     std::ofstream out(out_path, std::ios::binary);
-    if (!out) { log_error("Cannot create: " + out_path); close_socket(fd); return ""; }
+    if (!out) {
+        log_error("Cannot create: " + out_path);
+        close_socket(fd);
+        return "";
+    }
 
     std::string expected_checksum;
     uintmax_t expected_size = 0, received = 0;
+
     auto t_start = std::chrono::steady_clock::now();
     auto t_last  = t_start;
     uintmax_t bytes_since_last = 0;
@@ -348,47 +353,64 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
 
     while (true) {
         auto msg = recv_dec(fd, key);
-        if (msg.empty()) { log_error("Connection lost during download"); break; }
+        if (msg.empty()) {
+            log_error("Connection lost during download");
+            break;
+        }
 
         MsgType type = (MsgType)msg[0];
         const char* body_data = (const char*)msg.data() + 1;
         size_t body_len = msg.size() - 1;
-        std::string body_str(body_data, body_len);
 
         if (type == MsgType::INSTALL_ERROR) {
+            std::string err(body_data, body_len);
             std::cout << "\n";
-            log_error("Server: " + body_str);
-            close_socket(fd); out.close(); fs::remove(out_path); return "";
+            log_error("Server: " + err);
+            close_socket(fd);
+            out.close();
+            fs::remove(out_path);
+            return "";
         }
+
         if (type == MsgType::INSTALL_END) {
-            expected_checksum = body_str;
+            expected_checksum.assign(body_data, body_len);
             break;
         }
+
         if (type == MsgType::INSTALL_DATA) {
-            if (body_str.rfind("SIZE:", 0) == 0) {
-                expected_size = std::stoull(body_str.substr(5));
+            // Detect SIZE header safely (text message)
+            if (body_len >= 5 && std::memcmp(body_data, "SIZE:", 5) == 0) {
+                std::string size_str(body_data + 5, body_len - 5);
+                expected_size = std::stoull(size_str);
+
                 std::cout << "\n";
                 print_divider();
                 std::cout << bold("  Downloading  ") << cyan(pkg_name)
-                          << "  from " << srv.name << "  (" << human_size(expected_size) << ")\n";
+                          << "  from " << srv.name
+                          << "  (" << human_size(expected_size) << ")\n";
                 print_divider();
-            } else {
-                out.write(body_data, body_len);
-                received += body_len;
-                bytes_since_last += body_len;
+                continue;
+            }
 
-                auto now = std::chrono::steady_clock::now();
-                double dt = std::chrono::duration<double>(now - t_last).count();
-                if (dt >= 0.25) {
-                    speed = bytes_since_last / dt;
-                    bytes_since_last = 0;
-                    t_last = now;
-                }
-                if (expected_size > 0)
-                    print_progress("  Downloading", received, expected_size, speed);
+            // Binary data (write directly)
+            out.write(body_data, body_len);
+            received += body_len;
+            bytes_since_last += body_len;
+
+            auto now = std::chrono::steady_clock::now();
+            double dt = std::chrono::duration<double>(now - t_last).count();
+            if (dt >= 0.25) {
+                speed = bytes_since_last / dt;
+                bytes_since_last = 0;
+                t_last = now;
+            }
+
+            if (expected_size > 0) {
+                print_progress("  Downloading", received, expected_size, speed);
             }
         }
     }
+
     out.close();
     close_socket(fd);
 
@@ -401,6 +423,7 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
     if (!expected_checksum.empty()) {
         std::cout << "  Verifying checksum...";
         std::cout << std::flush;
+
         std::string actual = crypto::sha256_hex_file(out_path);
         if (actual != expected_checksum) {
             std::cout << "\n";
@@ -408,6 +431,7 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
             fs::remove(out_path);
             return "";
         }
+
         std::cout << " " << green("✓ OK") << "\n";
     }
 
@@ -741,6 +765,7 @@ int Client::cmd_install(const std::string& pkg_name, bool auto_yes) {
 
 int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     std::cout << "\n" << bold("Downloading: ") << cyan(pkg_name) << "\n";
+    std::cout << std::flush;
 
     // Check for repo package first
     auto cached = db_.find_package(pkg_name);
@@ -748,17 +773,29 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
 
     if (cached && cached->server_origin.rfind("[repo]", 0) == 0 && !cached->file_path.empty()) {
         std::cout << "  Source: " << cyan(cached->server_origin) << "\n";
+        std::cout << std::flush;
         tar_path = download_from_repo(pkg_name);
     } else {
         int spin = 0;
         spinner_step("Searching LAN...", spin++);
+        std::cout << std::flush;
+
         auto srv = find_server_for_package(pkg_name);
-        std::cout << "\r\033[K\n";
-        if (!srv) { log_error("Package '" + pkg_name + "' not found."); return 1; }
+
+        std::cout << "\r\033[K\n" << std::flush;
+
+        if (!srv) {
+            log_error("Package '" + pkg_name + "' not found.");
+            return 1;
+        }
+
         tar_path = download_from_server(*srv, pkg_name);
     }
 
-    if (tar_path.empty()) return 1;
+    if (tar_path.empty()) {
+        std::cout << std::flush;
+        return 1;
+    }
 
     fs::path cwd  = fs::current_path();
     fs::path dest = cwd / pkg_name;
@@ -767,12 +804,20 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     print_divider();
     install_step(1, 2, "Extracting package to current directory...");
     std::cout << "  Destination: " << dest.string() << "\n";
+    std::cout << std::flush;
 
     std::error_code ec;
     fs::create_directories(dest, ec);
-    if (ec) { log_error("Cannot create directory '" + dest.string() + "': " + ec.message()); return 1; }
+    if (ec) {
+        log_error("Cannot create directory '" + dest.string() + "': " + ec.message());
+        return 1;
+    }
 
-    if (!tar::extract(tar_path, dest.string())) { log_error("Failed to extract archive"); return 1; }
+    if (!tar::extract(tar_path, dest.string())) {
+        log_error("Failed to extract archive");
+        return 1;
+    }
+
     install_ok("Extracted successfully");
 
     install_step(2, 2, "Cleaning up...");
@@ -780,7 +825,11 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
     install_ok("Done");
 
     print_divider();
-    std::cout << "\n" << green("✓ Package extracted to: ") << bold(dest.string()) << "\n\n";
+    std::cout << "\n" << green("✓ Package extracted to: ")
+              << bold(dest.string()) << "\n\n";
+
+    std::cout << std::flush;
+
     return 0;
 }
 
@@ -803,17 +852,12 @@ int Client::cmd_scan() {
     } else {
         int total_pkgs = 0;
         for (auto& srv : servers) {
-            std::cout << "\n  " << green("●") << " " << bold(srv.name)
-                      << "  " << srv.host << ":" << srv.port;
-            if (srv.needs_password) std::cout << "  " << yellow("[auth]");
-            std::cout << "\n";
+
+            db_.remove_packages_from_server(srv.name);
 
             std::vector<uint8_t> key;
             socket_t fd = connect_and_handshake(srv, key);
-            if (fd == INVALID_SOCK) {
-                std::cout << "    " << red("✗ Connection failed") << "\n";
-                continue;
-            }
+            if (fd == INVALID_SOCK) continue;
 
             net::send_frame(fd, make_msg(MsgType::PKG_LIST, "", key));
             auto resp = recv_dec(fd, key);
@@ -823,28 +867,23 @@ int Client::cmd_scan() {
                 std::string body(resp.begin()+1, resp.end());
                 std::istringstream ss(body);
                 std::string line;
-                int count = 0;
+
                 while (std::getline(ss, line)) {
                     if (line.empty()) continue;
+
                     auto p1 = line.find('|');
-                    if (p1 == std::string::npos) continue;
-                    auto p2 = line.find('|', p1+1);
+                    auto p2 = line.find('|', p1 + 1);
 
                     PackageInfo info;
                     info.name          = line.substr(0, p1);
                     info.version       = line.substr(p1+1, (p2!=std::string::npos?p2-p1-1:std::string::npos));
                     info.description   = (p2!=std::string::npos) ? line.substr(p2+1) : "";
                     info.server_origin = srv.name;
-                    db_.upsert_package(info);
 
-                    std::cout << "    " << cyan(info.name) << "  v" << info.version;
-                    if (!info.description.empty()) std::cout << "  " << info.description;
-                    if (db_.is_installed(info.name)) std::cout << "  " << green("(installed)");
-                    std::cout << "\n";
-                    count++;
+                    db_.upsert_package(info); // still fine (now safe)
                 }
-                total_pkgs += count;
             }
+
             db_.upsert_server(srv);
             srv.reachable = true;
         }

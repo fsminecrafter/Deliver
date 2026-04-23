@@ -104,6 +104,7 @@ private:
     void   do_ping_selected();
     void   do_add_repo();
     void   do_remove_repo();
+    void   do_untrack_selected();
 
     // ── Data management ───────────────────────────────────────────────────────
     void   load_data();

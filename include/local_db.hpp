@@ -17,6 +17,7 @@ public:
     // Package DB
     void upsert_package(const PackageInfo& info);
     std::optional<PackageInfo> find_package(const std::string& name) const;
+    void remove_packages_from_server(const std::string& server);
     std::vector<PackageInfo>   search_packages(const std::string& query) const;
     std::vector<PackageInfo>   list_packages() const;
 
@@ -34,6 +35,8 @@ public:
 
     // Installed packages tracking
     void mark_installed(const std::string& pkg_name, const std::string& version);
+    void unmark_installed(const std::string& name);
+    std::vector<PackageInfo> list_installed() const;
     bool is_installed(const std::string& pkg_name) const;
     std::string installed_version(const std::string& pkg_name) const;
 

@@ -2,6 +2,7 @@
 #include "config.hpp"
 #include "logger.hpp"
 #include "server.hpp"
+#include "server_tui.hpp"
 #include "package_registry.hpp"
 #include "version.hpp"
 #include <iostream>
@@ -140,6 +141,16 @@ int main(int argc, char** argv) {
     auto srv_cfg = dlr::load_server_config();
     if (srv_cfg.name.empty()) srv_cfg.name = "deliver-server";
 
+    if (cmd == "enterserverapp") {
+        if (getuid() != 0) {
+            std::cerr << red("Error: ") << "Server TUI must be run as root (use sudo).\n";
+            return 1;
+        }
+
+        dlr::ServerTuiApp app(srv_cfg);
+        return app.run();
+    }
+
     if (cmd == "status") {
         dlr::Server srv(srv_cfg);
         srv.print_status();
@@ -252,6 +263,15 @@ int main(int argc, char** argv) {
     // ── Client commands ───────────────────────────────────────────────────────
     auto cli_cfg = dlr::load_client_config();
     dlr::Client client(cli_cfg);
+
+    if (cmd == "enterserverapp") {
+        if (getuid() != 0) {
+            std::cerr << red("Error: ") << "Run with sudo.\n";
+            return 1;
+        }
+        dlr::ServerTuiApp app(srv_cfg);
+        return app.run();
+    }
 
     if (cmd == "install") {
         if (!require_args(args, 2, "dlr install [-y] <package>")) return 1;
