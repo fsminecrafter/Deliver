@@ -45,11 +45,11 @@ jobs:
         if [ -f /etc/debian_version ] && ! grep -qi ubuntu /etc/os-release; then
           echo "Detected Debian"
           chmod +x install_debian.sh
-          ./install_debian.sh
+          sudo ./install_debian.sh
         else
           echo "Detected Ubuntu"
           chmod +x install.sh
-          ./install.sh
+          sudo ./install.sh
         fi
 
     - name: Run install script (Windows)
