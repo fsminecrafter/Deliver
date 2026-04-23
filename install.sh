@@ -64,6 +64,7 @@ case "$ID" in
             build-essential cmake ninja-build \
             libssl-dev zlib1g-dev \
             nlohmann-json3-dev \
+            libcurl4-openssl-dev \
             tar gzip
         ;;
     fedora)
