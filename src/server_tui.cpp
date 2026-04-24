@@ -684,48 +684,48 @@ void ServerTuiApp::view_create(int top, int left, int h, int w) {
     buf_ += bold("  CREATE / PRESENT PACKAGE"); clrline();
     hline(top+1, left, w-1);
 
-    if (!in_form_) {
+    if (!in_form_ && !form_confirm_) {
         // Mode selection
         move(top+3, left+2);
-        buf_ += "What do you want to present?\n";
+        buf_ += "What do you want to present?"; clrline();
         move(top+5, left+4);
-        buf_ += col_c("f") + "  →  Present a " + bold("File");
+        buf_ += col_c("f") + "  →  Present a " + bold("File"); clrline();
         move(top+6, left+4);
-        buf_ += col_c("F") + "  →  Present a " + bold("Folder / Directory");
+        buf_ += col_c("F") + "  →  Present a " + bold("Folder / Directory"); clrline();
         move(top+8, left+2);
-        buf_ += dim("Press f or F to start the wizard.");
+        buf_ += dim("Press f or F to start the wizard."); clrline();
         return;
     }
 
-    // Form rendering
+    // Form rendering (also shown during confirm so fields are visible)
     move(top+2, left+2);
     buf_ += bold(form_title_); clrline();
     hline(top+3, left+2, w-4);
 
     for (int i = 0; i < (int)form_fields_.size(); i++) {
         auto& ff = form_fields_[i];
-        bool active = (i == form_field_) && !form_confirm_;
+        bool active = (i == form_field_) && in_form_ && !form_confirm_;
         int row = top + 5 + i * 3;
         move(row, left+2);
-        buf_ += (active ? col_c(bold(ff.label)) : col_c(ff.label)) + ":";
-        clrline();
+        buf_ += (active ? col_c(bold(ff.label)) : col_c(ff.label)) + ":"; clrline();
         move(row+1, left+4);
         if (active)
             buf_ += "\033[1;7m " + pad_right(ff.value + "_", w-8) + " \033[0m";
         else
-            buf_ += "\033[36m " + pad_right(ff.value, w-8) + " \033[0m";
-        clrline();
+            buf_ += " " + ff.value; clrline();
     }
 
     if (form_confirm_) {
         int cr = top + 5 + (int)form_fields_.size() * 3 + 2;
         hline(cr, left+2, w-4);
         move(cr+1, left+2);
-        buf_ += col_y("Confirm?  ") + bold("[y]") + " Yes  /  " + bold("[ESC]") + " Cancel";
+        buf_ += col_y("Confirm?  ") + bold("[y]") + " Yes  /  " + bold("[ESC/n]") + " Cancel";
+        clrline();
     } else {
         int hr = top + 5 + (int)form_fields_.size() * 3 + 1;
         move(hr, left+2);
         buf_ += dim("Tab/Enter: next  |  ESC: cancel  |  After last field: press Enter to confirm");
+        clrline();
     }
 }
 
@@ -734,13 +734,14 @@ void ServerTuiApp::view_create(int top, int left, int h, int w) {
 void ServerTuiApp::view_edit(int top, int left, int h, int w) {
     move(top, left);
     if (edit_pkg_name_.empty()) {
-        buf_ += bold("  EDIT PACKAGE") + "  " + dim("(select from Packages view with 'e')");
+        buf_ += bold("  EDIT PACKAGE") + "  " + dim("(select a package from the Packages view with 'e')");
         clrline();
         hline(top+1, left, w-1);
         move(top+4, left+2);
-        buf_ += col_y("No package selected.");
+        buf_ += col_y("No package selected."); clrline();
         move(top+5, left+2);
         buf_ += dim("Switch to 'Packages' (Tab), highlight a package, press ") + bold("e") + dim(" to edit it.");
+        clrline();
         return;
     }
 
@@ -748,39 +749,57 @@ void ServerTuiApp::view_edit(int top, int left, int h, int w) {
     hline(top+1, left, w-1);
 
     if (form_fields_.empty()) {
-        move(top+3, left+2); buf_ += col_r("Package not found."); return;
+        move(top+3, left+2);
+        buf_ += col_r("Package not found."); clrline();
+        return;
+    }
+
+    if (form_confirm_) {
+        // Show fields greyed out + confirm prompt
+        for (int i = 0; i < (int)form_fields_.size(); i++) {
+            auto& ff = form_fields_[i];
+            int row = top + 3 + i * 3;
+            if (row >= top + h - 4) break;
+            move(row, left+2);
+            buf_ += col_c(ff.label) + ":"; clrline();
+            move(row+1, left+4);
+            buf_ += dim(" " + ff.value); clrline();
+        }
+        int cr = top + 3 + (int)form_fields_.size() * 3 + 1;
+        if (cr < top + h - 1) {
+            hline(cr, left+2, w-4);
+            move(cr+1, left+2);
+            buf_ += col_y("Save changes?  ") + bold("[y]") + " Yes  /  " + bold("[n/ESC]") + " Cancel";
+            clrline();
+        }
+        return;
     }
 
     for (int i = 0; i < (int)form_fields_.size(); i++) {
         auto& ff = form_fields_[i];
-        bool active = (i == form_field_) && in_form_ && !form_confirm_;
+        bool active = in_form_ && (i == form_field_);
         int row = top + 3 + i * 3;
-        if (row >= top + h - 3) break;
+        if (row >= top + h - 4) break;
         move(row, left+2);
         buf_ += (active ? col_c(bold(ff.label)) : col_c(ff.label)) + ":"; clrline();
         move(row+1, left+4);
-        if (in_form_ && active)
-            buf_ += "\033[1;7m " + pad_right(ff.value + "_", w-8) + " \033[0m";
+        if (active)
+            buf_ += "\033[1;7m " + pad_right(ff.value + "_", w - 8) + " \033[0m";
         else
-            buf_ += " " + col_c(ff.value); clrline();
+            buf_ += " " + dim(ff.value);
+        clrline();
     }
 
-    int btnrow = top + 3 + (int)form_fields_.size() * 3 + 1;
-    if (btnrow < top+h-3) {
-        hline(btnrow, left+2, w-4);
-        move(btnrow+1, left+2);
-        if (in_form_) {
-            if (form_confirm_) {
-                buf_ += col_y("Confirm save?  ") + bold("[y]") + " Yes  /  " + bold("[ESC]") + " Cancel";
-            } else {
-                buf_ += dim("Tab:next  S:save  ESC:cancel editing  Del:remove package");
-            }
-        } else {
-            buf_ += dim("Press ") + bold("e") + dim(" (or Enter) to start editing  |  ")
-                 + bold("S") + dim(" to save directly  |  ")
-                 + bold("Del") + dim(" to remove");
-        }
+    // Footer hint inside content area
+    int hr = top + h - 2;
+    hline(hr, left+2, w-4);
+    move(hr+1, left+2);
+    if (in_form_) {
+        buf_ += dim("Tab:next field  Ctrl+S:save  ESC:cancel  Del:remove package");
+    } else {
+        buf_ += dim("Start typing to edit  |  Ctrl+S:save  |  ESC:deselect  |  Del:remove");
     }
+    clrline();
 }
 
 // ── Log view ──────────────────────────────────────────────────────────────────
@@ -809,11 +828,12 @@ void ServerTuiApp::handle_key(int k) {
     // Confirmation dialog
     if (form_confirm_) {
         if (k == 'y' || k == 'Y') {
+            form_confirm_ = false;  // clear FIRST before action modifies state
             if (view_ == View::CreatePkg) action_execute_create();
             else if (view_ == View::EditPkg) action_save_edit();
+        } else if (k == 27 || k == 'n' || k == 'N') {
             form_confirm_ = false;
-        } else if (k == STK_ESC) {
-            form_confirm_ = false;
+            tlog("Save cancelled by user.");
             set_status("Cancelled.");
         }
         dirty_ = true; return;
@@ -889,12 +909,43 @@ void ServerTuiApp::handle_key(int k) {
 
     if (view_ == View::EditPkg) {
         if (!edit_pkg_name_.empty()) {
-            if (k=='e'||k=='E'||k==STK_ENTER) {
-                in_form_ = true; form_field_ = 0; dirty_ = true;
-            } else if ((k=='s'||k=='S') && !in_form_) {
-                form_confirm_ = true; dirty_ = true;
-            } else if ((k==STK_DEL||k==0x7f||k=='d'||k=='D') && !in_form_) {
+            if (k == 19) {  // Ctrl+S — save
+                if (!in_form_) {
+                    // not editing yet, nothing to save
+                } else {
+                    form_confirm_ = true;
+                    in_form_      = false;
+                }
+                dirty_ = true;
+                return;
+            }
+            if (k == 27) {  // ESC — cancel editing or deselect
+                if (in_form_) {
+                    in_form_     = false;
+                    form_field_  = 0;
+                    set_status("Edit cancelled.");
+                } else {
+                    edit_pkg_name_.clear();
+                    form_fields_.clear();
+                    set_status("Deselected.");
+                }
+                dirty_ = true;
+                return;
+            }
+            if ((k == STK_DEL || k == 0x7f || k == 'd' || k == 'D') && !in_form_) {
                 action_remove_package();
+                return;
+            }
+            // Any printable key or Tab/Enter while a package is selected
+            // → start editing immediately and pass the key to the form handler
+            if (!in_form_ && ((k >= 32 && k < 127) || k == 9 || k == 13)) {
+                in_form_     = true;
+                form_field_  = 0;
+                form_confirm_= false;
+            }
+            if (in_form_) {
+                handle_key_form(k);
+                return;
             }
         }
     }
@@ -903,35 +954,42 @@ void ServerTuiApp::handle_key(int k) {
 void ServerTuiApp::handle_key_form(int k) {
     int n_fields = (int)form_fields_.size();
 
-    // Guard: if somehow there are no fields, bail out
-    if (n_fields == 0) {
-        in_form_ = false; dirty_ = true; return;
-    }
-
-    // Clamp field index defensively
+    if (n_fields == 0) { in_form_ = false; dirty_ = true; return; }
     if (form_field_ < 0) form_field_ = 0;
     if (form_field_ >= n_fields) form_field_ = n_fields - 1;
 
-    // ESC: raw value 27
-    if (k == 27) {
-        in_form_ = false; form_confirm_ = false;
-        set_status("Cancelled.");
-        dirty_ = true; return;
+    if (k == 27) {  // ESC — cancel form
+        in_form_      = false;
+        form_confirm_ = false;
+        set_status("Edit cancelled.");
+        dirty_ = true;
+        return;
     }
 
-    // Enter (13) or Tab (9): advance or confirm on last field
-    if (k == 13 || k == 9) {
+    if (k == 19) {  // Ctrl+S — trigger save confirm from anywhere in the form
+        in_form_      = false;
+        form_confirm_ = true;
+        dirty_ = true;
+        return;
+    }
+
+    if (k == 13 || k == 9) {  // Enter or Tab — advance field
         if (form_field_ < n_fields - 1) {
             form_field_++;
         } else {
-            in_form_      = false;
-            form_confirm_ = true;
+            // Last field: Tab wraps to first, Enter triggers save
+            if (k == 9) {
+                form_field_ = 0;
+            } else {
+                in_form_      = false;
+                form_confirm_ = true;
+            }
         }
-        dirty_ = true; return;
+        dirty_ = true;
+        return;
     }
 
-    // Backspace (127 or 8)
-    if (k == 127 || k == 8) {
+    if (k == 127 || k == 8) {  // Backspace
         if (!form_fields_[form_field_].value.empty()) {
             form_fields_[form_field_].value.pop_back();
             dirty_ = true;
@@ -939,7 +997,6 @@ void ServerTuiApp::handle_key_form(int k) {
         return;
     }
 
-    // Printable ASCII
     if (k >= 32 && k < 127) {
         form_fields_[form_field_].value += (char)k;
         dirty_ = true;
@@ -960,11 +1017,10 @@ void ServerTuiApp::select_package_for_edit(int idx) {
     if (idx < 0 || idx >= (int)packages_.size()) return;
     auto& p = packages_[idx];
     edit_pkg_name_ = p.name;
-    in_form_ = false;
-    form_confirm_ = false;
-    form_field_ = 0;
+    in_form_       = true;   // start in edit mode immediately
+    form_confirm_  = false;
+    form_field_    = 0;
 
-    // Build editable fields
     form_fields_ = {
         {"Name",           p.name},
         {"Version",        p.version},
@@ -973,15 +1029,17 @@ void ServerTuiApp::select_package_for_edit(int idx) {
         {"Install cmd",    p.installcommand},
         {"Dependencies",   [&](){
             std::string s;
-            for (size_t i=0; i<p.dependencies.size(); i++) {
-                if(i) s += ", "; s += p.dependencies[i];
+            for (size_t i = 0; i < p.dependencies.size(); i++) {
+                if (i) s += ", ";
+                s += p.dependencies[i];
             }
             return s;
         }()},
         {"Rival pack",     p.rivalpack},
         {"File path",      p.file_path},
     };
-    tlog("Opened for edit: " + p.name);
+    tlog("Editing: " + p.name);
+    set_status("Editing " + p.name + " — Tab:next  Ctrl+S:save  ESC:cancel");
 }
 
 void ServerTuiApp::action_remove_package() {
@@ -1021,43 +1079,76 @@ void ServerTuiApp::action_remove_package() {
 }
 
 void ServerTuiApp::action_save_edit() {
-    if (edit_pkg_name_.empty() || form_fields_.size() < 8) return;
+    if (edit_pkg_name_.empty()) {
+        tlog("action_save_edit: no package selected");
+        set_status("Error: no package selected.");
+        return;
+    }
+    if ((int)form_fields_.size() < 8) {
+        tlog("action_save_edit: only " + std::to_string(form_fields_.size()) + " fields, need 8");
+        set_status("Error: form incomplete.");
+        return;
+    }
 
-    // Re-load registry, update the entry, save
-    registry_.load();
-    auto info_opt = registry_.find(edit_pkg_name_);
-    if (!info_opt) { set_status("Package not found: " + edit_pkg_name_); return; }
+    // Build the target paths first
+    fs::path pkg_dir  = fs::path(srv_cfg_.data_dir) / edit_pkg_name_;
+    fs::path pkg_file = pkg_dir / (edit_pkg_name_ + ".pkg");
 
-    PackageInfo info = *info_opt;
-    // Apply form values
-    // field[0]=name (don't rename for now — complex), [1]=version, etc.
+    tlog("Saving: " + pkg_file.string());
+
+    // Ensure directory exists
+    std::error_code ec;
+    fs::create_directories(pkg_dir, ec);
+    if (ec) {
+        tlog("action_save_edit: mkdir failed: " + ec.message());
+        set_status("Error: cannot create directory.");
+        return;
+    }
+
+    // Build PackageInfo from form — don't call registry_.find() or registry_.load()
+    // as that can reset state. Build directly from form fields.
+    PackageInfo info;
+    info.name           = edit_pkg_name_;
     info.version        = form_fields_[1].value;
     info.description    = form_fields_[2].value;
     info.installscript  = form_fields_[3].value;
     info.installcommand = form_fields_[4].value;
-    // dependencies: re-parse comma-separated
-    info.dependencies.clear();
-    std::istringstream dep_ss(form_fields_[5].value);
-    std::string dep_tok;
-    while (std::getline(dep_ss, dep_tok, ',')) {
-        while (!dep_tok.empty() && dep_tok.front()==' ') dep_tok.erase(dep_tok.begin());
-        while (!dep_tok.empty() && dep_tok.back()==' ') dep_tok.pop_back();
-        if (!dep_tok.empty()) info.dependencies.push_back(dep_tok);
-    }
     info.rivalpack      = form_fields_[6].value;
     info.file_path      = form_fields_[7].value;
+    info.arch           = Arch::ANY;
+    info.operatingsystem = OS::ANY;
 
-    // Write updated .pkg file
-    std::string pkg_file = (fs::path(srv_cfg_.data_dir) / edit_pkg_name_ / (edit_pkg_name_+".pkg")).string();
-    write_pkg(pkg_file, info);
+    // Parse comma-separated dependencies
+    {
+        std::istringstream dep_ss(form_fields_[5].value);
+        std::string dep_tok;
+        while (std::getline(dep_ss, dep_tok, ',')) {
+            while (!dep_tok.empty() && dep_tok.front() == ' ') dep_tok.erase(dep_tok.begin());
+            while (!dep_tok.empty() && dep_tok.back()  == ' ') dep_tok.pop_back();
+            if (!dep_tok.empty()) info.dependencies.push_back(dep_tok);
+        }
+    }
 
-    // Update registry via attach_pkg (re-reads the file)
-    registry_.attach_pkg(pkg_file, edit_pkg_name_);
+    // Write .pkg file
+    if (!write_pkg(pkg_file.string(), info)) {
+        tlog("action_save_edit: write_pkg failed for: " + pkg_file.string());
+        set_status("Error: failed to write .pkg file.");
+        return;
+    }
+    tlog("write_pkg OK: " + pkg_file.string());
+
+    // Attach updates the in-memory registry and saves the JSON
+    if (!registry_.attach_pkg(pkg_file.string(), edit_pkg_name_)) {
+        tlog("action_save_edit: attach_pkg failed for: " + edit_pkg_name_);
+        set_status("Error: failed to update registry.");
+        return;
+    }
 
     tlog("Saved changes to: " + edit_pkg_name_);
     set_status("Saved: " + edit_pkg_name_);
+    in_form_      = false;
+    form_confirm_ = false;
     refresh_packages();
-    in_form_ = false;
     dirty_ = true;
 }
 
@@ -1069,10 +1160,12 @@ void ServerTuiApp::action_execute_create() {
     if (path.empty() || pkg_name.empty()) {
         set_status("Error: path and package name are required.");
         in_form_ = true; form_field_ = 0;
+        form_confirm_ = false;
+        dirty_ = true;
         return;
     }
 
-    // Run interactively
+    // Switch to normal terminal for registry output
     term_restore();
     std::cout << "\033[2J\033[H";
 
@@ -1084,22 +1177,33 @@ void ServerTuiApp::action_execute_create() {
     }
 
     if (ok) {
-        // Auto-generate a .pkg manifest
-        std::string pkg_file = (fs::path(srv_cfg_.data_dir) / pkg_name / (pkg_name+".pkg")).string();
+        std::string pkg_file = (fs::path(srv_cfg_.data_dir) / pkg_name / (pkg_name + ".pkg")).string();
         registry_.generate_pkg(pkg_file, pkg_name);
         tlog("Presented " + create_mode_ + ": " + path + " → " + pkg_name);
-        set_status("Created package: " + pkg_name);
     } else {
-        set_status("Failed to create package.");
+        tlog("Failed to present " + create_mode_ + ": " + path);
     }
 
-    std::cout << "\nPress any key to continue...";
-    std::cout.flush();
+    std::cout << "\nPress any key to continue..." << std::flush;
+
+    // Back to raw mode BEFORE reading the keypress
     term_raw();
-    term_read();
+
+    // Drain one key in raw mode (non-blocking with timeout)
+    for (int i = 0; i < 50; i++) {
+        int c = term_read();  // 200ms timeout each
+        if (c != -1) break;
+    }
+
     refresh_packages();
-    in_form_ = false;
+    in_form_      = false;
+    form_confirm_ = false;
     form_fields_.clear();
+    create_mode_.clear();
+
+    if (ok) set_status("Created package: " + pkg_name);
+    else    set_status("Failed to create package: " + path);
+
     dirty_ = true;
 }
 
