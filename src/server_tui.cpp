@@ -903,24 +903,35 @@ void ServerTuiApp::handle_key(int k) {
 void ServerTuiApp::handle_key_form(int k) {
     int n_fields = (int)form_fields_.size();
 
-    if (k == STK_ESC) {
+    // Guard: if somehow there are no fields, bail out
+    if (n_fields == 0) {
+        in_form_ = false; dirty_ = true; return;
+    }
+
+    // Clamp field index defensively
+    if (form_field_ < 0) form_field_ = 0;
+    if (form_field_ >= n_fields) form_field_ = n_fields - 1;
+
+    // ESC: raw value 27
+    if (k == 27) {
         in_form_ = false; form_confirm_ = false;
         set_status("Cancelled.");
         dirty_ = true; return;
     }
 
-    if (k == STK_ENTER || k == STK_TAB) {
+    // Enter (13) or Tab (9): advance or confirm on last field
+    if (k == 13 || k == 9) {
         if (form_field_ < n_fields - 1) {
             form_field_++;
         } else {
-            // Last field → trigger confirm
-            in_form_     = false;
+            in_form_      = false;
             form_confirm_ = true;
         }
         dirty_ = true; return;
     }
 
-    if (k == STK_BACKSP || k == 127) {
+    // Backspace (127 or 8)
+    if (k == 127 || k == 8) {
         if (!form_fields_[form_field_].value.empty()) {
             form_fields_[form_field_].value.pop_back();
             dirty_ = true;
@@ -928,6 +939,7 @@ void ServerTuiApp::handle_key_form(int k) {
         return;
     }
 
+    // Printable ASCII
     if (k >= 32 && k < 127) {
         form_fields_[form_field_].value += (char)k;
         dirty_ = true;
