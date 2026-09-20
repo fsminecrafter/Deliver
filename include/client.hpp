@@ -34,7 +34,19 @@ public:
 
 private:
     std::optional<ServerInfo> find_server_for_package(const std::string& pkg_name);
-    std::string download_from_server(const ServerInfo& srv, const std::string& pkg_name);
+
+    // What to do when a server answers with a Minimal-OS .mpkg instead of
+    // a tar (see "Archive format" in the README). This platform has no
+    // way to extract one, so `install` refuses it up front - before
+    // spending the bandwidth - while `download` keeps it as a file to
+    // carry to a Minimal-OS machine.
+    enum class OnMpkg { Refuse, Keep };
+
+    // Returns the path of the downloaded archive, or "" on failure. The
+    // extension says what it is: ".tar" (extract it) or ".mpkg" (only
+    // possible with OnMpkg::Keep; cannot be extracted here).
+    std::string download_from_server(const ServerInfo& srv, const std::string& pkg_name,
+                                     OnMpkg on_mpkg = OnMpkg::Refuse);
     std::string download_from_repo(const std::string& pkg_name);
     int install_tar(const std::string& tar_path, bool auto_yes);
     void scan_repos();

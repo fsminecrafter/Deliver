@@ -218,6 +218,17 @@ Frame structure:
 | PING             | 0x30 | C→S              | Ping                   |
 | PONG             | 0x31 | S→C              | Pong                   |
 
+### Archive format
+
+A package download starts with an `INSTALL_DATA` frame holding a text header, followed by raw chunks, then `INSTALL_END` with the SHA-256:
+
+```
+SIZE:123456                                  a tar   (dlr_server on Linux/Windows)
+SIZE:123456|FORMAT=mpkg|OS=minimalos         a .mpkg (a Minimal-OS server)
+```
+
+Only a **Minimal-OS server** sends `.mpkg`, its native archive format. Clients on other platforms cannot extract it: `dlr install` warns and refuses before downloading the archive, and `dlr download` warns and saves it as `<name>.mpkg` (to copy to a Minimal-OS machine) instead of extracting. Clients older than this field still read the size correctly but will fail at the extraction step. Tar support on Minimal-OS servers may be added later.
+
 ---
 
 ## Configuration

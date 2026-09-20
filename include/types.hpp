@@ -12,6 +12,18 @@ constexpr uint16_t DISCOVERY_PORT      = 4243;
 constexpr int      PROTOCOL_VERSION    = 1;
 constexpr int      BUFFER_SIZE         = 65536;
 
+// The first INSTALL_DATA frame of a transfer is a text header:
+//
+//     SIZE:<bytes>                                  a tar (every server but Minimal-OS)
+//     SIZE:<bytes>|FORMAT=mpkg|OS=minimalos         a Minimal-OS .mpkg archive
+//
+// Everything after the digits is optional and ignored by clients that do
+// not know it (std::stoull stops at the first non-digit), so adding
+// fields here does not break older clients - they just cannot do
+// anything useful with an archive format they do not understand. This
+// program's client checks FORMAT and says so instead of failing at the
+// tar step.
+
 // Message types exchanged on the wire
 enum class MsgType : uint8_t {
     HELLO           = 0x01,

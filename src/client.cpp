@@ -207,7 +207,8 @@ static void clean_cache(const std::string& cache_dir) {
     for (auto& entry : fs::directory_iterator(cache_dir, ec)) {
         if (ec) break;
         auto& p = entry.path();
-        if (p.extension() == ".tar" || p.filename().string().rfind(".extract_", 0) == 0) {
+        if (p.extension() == ".tar" || p.extension() == ".mpkg" ||
+            p.filename().string().rfind(".extract_", 0) == 0) {
             fs::remove_all(p, ec);
             if (!ec) removed++;
         }
@@ -328,7 +329,8 @@ std::optional<ServerInfo> Client::find_server_for_package(const std::string& pkg
 
 // ── TCP Download ───────────────────────────────────────────────────────────────
 
-std::string Client::download_from_server(const ServerInfo& srv, const std::string& pkg_name) {
+std::string Client::download_from_server(const ServerInfo& srv, const std::string& pkg_name,
+                                         OnMpkg on_mpkg) {
     std::vector<uint8_t> key;
     socket_t fd = connect_and_handshake(srv, key);
     if (fd == INVALID_SOCK) return "";
@@ -345,6 +347,7 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
 
     std::string expected_checksum;
     uintmax_t expected_size = 0, received = 0;
+    bool is_mpkg = false;
 
     auto t_start = std::chrono::steady_clock::now();
     auto t_last  = t_start;
@@ -382,6 +385,28 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
             if (body_len >= 5 && std::memcmp(body_data, "SIZE:", 5) == 0) {
                 std::string size_str(body_data + 5, body_len - 5);
                 expected_size = std::stoull(size_str);
+
+                // A Minimal-OS server appends "|FORMAT=mpkg|OS=minimalos".
+                // stoull stops at the first non-digit, which is also why
+                // every client that predates this field still reads the
+                // size correctly (it just cannot extract what follows).
+                is_mpkg = size_str.find("|FORMAT=mpkg") != std::string::npos;
+                if (is_mpkg) {
+                    std::cout << "\n";
+                    log_warn("'" + pkg_name + "' is a Minimal-OS package (.mpkg), served by a "
+                             "Minimal-OS machine.");
+                    log_warn("This system cannot extract .mpkg archives, so it cannot install it.");
+
+                    if (on_mpkg == OnMpkg::Refuse) {
+                        std::cout << "  To keep the archive and install it on a Minimal-OS machine, use "
+                                  << bold("dlr download " + pkg_name) << ".\n\n";
+                        close_socket(fd);
+                        out.close();
+                        fs::remove(out_path);
+                        return "";
+                    }
+                    std::cout << "  Downloading anyway; it will be saved as a .mpkg file.\n";
+                }
 
                 std::cout << "\n";
                 print_divider();
@@ -433,6 +458,18 @@ std::string Client::download_from_server(const ServerInfo& srv, const std::strin
         }
 
         std::cout << " " << green("✓ OK") << "\n";
+    }
+
+    if (is_mpkg) {
+        // Name it for what it is so nothing later mistakes it for a tar.
+        std::string mpkg_path = cfg_.cache_dir + "/" + pkg_name + ".mpkg";
+        std::error_code ec;
+        fs::rename(out_path, mpkg_path, ec);
+        if (ec) {
+            log_error("Cannot rename download: " + ec.message());
+            return "";
+        }
+        return mpkg_path;
     }
 
     return out_path;
@@ -789,12 +826,31 @@ int Client::cmd_download(const std::string& pkg_name, bool auto_yes) {
             return 1;
         }
 
-        tar_path = download_from_server(*srv, pkg_name);
+        tar_path = download_from_server(*srv, pkg_name, OnMpkg::Keep);
     }
 
     if (tar_path.empty()) {
         std::cout << std::flush;
         return 1;
+    }
+
+    // A Minimal-OS archive cannot be extracted here. Hand the file over
+    // instead of failing after the fact: the point of `download` is to
+    // get the package, and this one is for another machine.
+    if (fs::path(tar_path).extension() == ".mpkg") {
+        fs::path dest_file = fs::current_path() / (pkg_name + ".mpkg");
+        std::error_code ec;
+        fs::copy_file(tar_path, dest_file, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            log_error("Cannot save '" + dest_file.string() + "': " + ec.message());
+            return 1;
+        }
+        fs::remove(tar_path, ec);
+
+        std::cout << "\n" << yellow("! Saved, but not extracted: ") << bold(dest_file.string()) << "\n"
+                  << "  It is a Minimal-OS archive. Copy it to a Minimal-OS machine to install it.\n\n"
+                  << std::flush;
+        return 0;
     }
 
     fs::path cwd  = fs::current_path();
