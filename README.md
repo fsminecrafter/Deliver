@@ -356,4 +356,4 @@ sudo ./dlr_server
 
 ## License
 
-MIT
+GNU GPL3
