@@ -50,7 +50,8 @@ private:
     void   term_raw();
     void   term_restore();
     void   term_size(int& rows, int& cols);
-    int    term_read();   // blocking read; returns TuiKey or char
+    int    term_read();   // waits up to ~100 ms; returns TuiKey or char, or -1 if nothing came
+    void   wait_key();    // blocks until a real key press (for "Press any key...")
 
     // ── Rendering ─────────────────────────────────────────────────────────────
     void   render();

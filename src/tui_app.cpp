@@ -615,7 +615,7 @@ void TuiApp::do_untrack_selected() {
     std::cout.flush();
 
     term_raw();
-    term_read();
+    wait_key();
 
     load_data();
 
@@ -776,10 +776,20 @@ void TuiApp::do_scan() {
     std::cout << "\nPress any key to return...";
     std::cout.flush();
     term_raw();
-    term_read();
+    wait_key();
     load_data();
     dirty_ = true;
     tlog("Scan complete");
+}
+
+// term_read() gives up after 100 ms so the main loop can notice a resize;
+// it returns -1 then. That is right for the main loop and wrong for
+// "Press any key to continue...": called once, it let the screen
+// disappear ~100 ms after the action's output appeared - the install,
+// download and ping results (and any warning) were gone before they
+// could be read. Keep reading until there really is a key.
+void TuiApp::wait_key() {
+    while (term_read() == -1) {}
 }
 
 void TuiApp::do_install_selected() {
@@ -799,7 +809,7 @@ void TuiApp::do_install_selected() {
     std::cout << "\nPress any key to continue...";
     std::cout.flush();
     term_raw();
-    term_read();
+    wait_key();
 
     load_data();
     dirty_ = true;
@@ -830,7 +840,7 @@ void TuiApp::do_download_selected() {
     std::cout << "\nPress any key to continue...";
     std::cout.flush();
     term_raw();
-    term_read();
+    wait_key();
 
     dirty_ = true;
 
@@ -857,7 +867,7 @@ void TuiApp::do_ping_selected() {
     std::cout << "\nPress any key to continue...";
     std::cout.flush();
     term_raw();
-    term_read();
+    wait_key();
     dirty_ = true;
 }
 
